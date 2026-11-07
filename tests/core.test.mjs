@@ -334,7 +334,6 @@ test('edits are phrase sized, apply in any subset, and hold protected text', () 
   const chosen = edits.filter(edit => !edit.held);
   assert.equal(safeResult(before, chosen), 'The slow red fox $x$ jumps high.');
   assert.throws(() => safeResult(before, edits), /not applied/);
-  assert.equal(safeResult(before, edits, { allowProtected:true }), after);
 });
 
 test('comment environments and notes on URL lines leave the arXiv source', () => {
@@ -429,4 +428,22 @@ test('preprints are checked against OpenAlex', async () => {
   const load = async () => new Response(JSON.stringify({ title:'T One', authorships:[{ author:{ display_name:'Ada Lovelace' } }] }));
   assert.equal((await auditEntry({ key:'k', fields:{ title:'T One', author:'Lovelace, Ada', doi:'10.48550/arXiv.1706.03762' } }, load)).status, 'checked');
   assert.equal((await auditEntry({ key:'k', fields:{ title:'Other', author:'Lovelace, Ada', eprint:'1706.03762' } }, load)).status, 'conflict');
+});
+
+test('a citation note may add a known key and nothing else protected', () => {
+  const before = 'As shown $x$ here.';
+  const add = wordEdits(before, 'As shown $x$ \\cite{k1} here.');
+  assert.equal(safeResult(before, add, { citeKeys:['k1'] }), 'As shown $x$ \\cite{k1} here.');
+  assert.throws(() => safeResult(before, wordEdits(before, 'As shown $x$ \\cite{invented} here.'), { citeKeys:['k1'] }), /not applied/);
+  assert.throws(() => safeResult(before, wordEdits(before, 'As shown $y$ \\cite{k1} here.'), { citeKeys:['k1'] }), /not applied/);
+});
+
+test('an anchor at its old offset still needs its context', () => {
+  const anchor = makeAnchor('aa word bb word cc', 11, 15);
+  assert.equal(locate('xxxxxxxword bb word cc', anchor), null, 'a copy shifted into the old offset is not the note, and two copies are never guessed');
+});
+
+test('comment markers inside verbatim stay', () => {
+  const source = '\\begin{verbatim}\n\\begin{comment}\n\\end{verbatim}';
+  assert.equal(stripComments(source).text, source);
 });

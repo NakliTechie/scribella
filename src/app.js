@@ -298,6 +298,7 @@ async function findInPdf(step = 0) {
 
 async function openFile(path) {
   await saveNow();
+  if (path && !state.files.includes(path)) throw new Error(`${path} is not in the project.`);
   clearTimeout(saveTimer);
   state.path = path;
   $('file-name').textContent = path;
@@ -450,6 +451,7 @@ async function renameFile(from, to) {
     await store.remove(fullPath(hold));
   } else { await writeFile(path, bytes); await store.remove(fullPath(from)); }
   if (from in state.texts) { state.texts[path] = state.texts[from]; delete state.texts[from]; }
+  if (review.notes.some(note => note.file === from)) { for (const note of review.notes) if (note.file === from) note.file = path; await saveNotes(); }
   state.files = await listFiles(store, state.project);
   if (state.settings.main === from) await changeSettings({ main:path });
   if (state.path === from) state.path = null;
@@ -716,6 +718,7 @@ function renderNotes() {
 }
 
 async function goToNote(note) {
+  if (!state.files.includes(note.file)) { say(`${note.file} is no longer in the project.`, true); return; }
   if (note.file !== state.path) await openFile(note.file);
   const place = whereIs(note);
   if (place) editor.select(place.from, place.to);
@@ -769,10 +772,13 @@ async function propose({ file, from, to, task = '', note = null, instruction = '
   const keys = [...projectIndex().bibKeys];
   const messages = buildMessages({ task, passage, before:text.slice(Math.max(0, from - 1200), from), after:text.slice(to, to + 1200), note:note?.body, intent:note?.intent, instruction, rejected, guidance, keys });
   say('Asking the model…');
+  const project = state.project;
   const reply = await askModel(messages);
+  if (state.project !== project) return 'abandoned';
   say('Ready.');
-  const allowProtected = note?.intent === 'cite';
-  review.proposal = { file, from, to, passage, task, note, instruction, allowProtected, ...reply, edits:reply.revision === undefined ? null : wordEdits(passage, reply.revision, { allowProtected }) };
+  // A citation note may add \\cite commands for keys in the bibliography, and nothing else protected.
+  const citeKeys = note?.intent === 'cite' ? keys : [];
+  review.proposal = { project, file, from, to, passage, task, note, instruction, citeKeys, ...reply, edits:reply.revision === undefined ? null : wordEdits(passage, reply.revision) };
   renderProposal();
   return new Promise(resolve => { review.proposal.done = resolve; });
 }
@@ -785,7 +791,8 @@ async function acceptProposal() {
   const proposal = review.proposal, { file, from, to, passage } = proposal;
   if (state.path !== file) await openFile(file);
   if (editor.slice(from, to) !== passage) throw new Error('This text changed while the proposal waited, so nothing was applied. Try again.');
-  const next = safeResult(passage, chosenEdits(), { allowProtected:proposal.allowProtected });
+  if (proposal.project !== state.project) throw new Error('This proposal belongs to another project.');
+  const next = safeResult(passage, chosenEdits(), { citeKeys:proposal.citeKeys });
   editor.replaceRange(from, to, next);
   if (proposal.note) {
     proposal.note.anchor = makeAnchor(editor.text, from, from + next.length);
@@ -914,10 +921,12 @@ async function arxivPack() {
   if (!canCompile()) { say(COMPILE_HINT()); return null; }
   await saveNow();
   // The .bbl must match the .bib as it is now, so the paper builds first.
+  const revision = state.revision;
   const fresh = await compile();
   $('build').hidden = false; $('cancel').hidden = true;
-  await afterBuild({ result:fresh, stale:false, revision:state.revision });
+  await afterBuild({ result:fresh, stale:revision !== state.revision, revision });
   if (!fresh.ok) { say('The paper does not build yet, so no arXiv pack was made.', true); return fresh; }
+  if (revision !== state.revision) { say('The text changed during the build, so no arXiv pack was made. Try again.', true); return null; }
   const main = state.settings.main, stem = main.replace(/\.[^.]+$/, '');
   const { used, missing } = usedFiles({ files:state.files, texts:state.texts, main });
   if (missing.length) { say(`Missing from the project: ${missing.join(', ')}`, true); return { missing }; }

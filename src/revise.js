@@ -37,8 +37,10 @@ export function parseReply(text) {
   return { revision:revision.replace(/^\n|\n$/g, ''), reason:(between(text, 'reason') || '').trim() };
 }
 
+const isNewCite = edit => edit.from === edit.to && /^\s*\\cite[a-z]*\{[^{}]*\}\s*$/.test(edit.insert);
+
 // Word-level edits as { from, to, insert, held }. Edits only whitespace apart merge into one phrase.
-export function wordEdits(before, after, { allowProtected = false } = {}) {
+export function wordEdits(before, after) {
   const tokens = text => text.match(/\s+|[^\s]+/g) || [];
   const spans = protectedSpans(before);
   const edits = [];
@@ -61,7 +63,7 @@ export function wordEdits(before, after, { allowProtected = false } = {}) {
     if (kind === '-') { at += token.length; open.to = at; } else open.insert += token;
   }
   close();
-  return edits.map(edit => ({ ...edit, original:before.slice(edit.from, edit.to), held:!allowProtected && touchesProtected(spans, edit.from, edit.to) }));
+  return edits.map(edit => ({ ...edit, original:before.slice(edit.from, edit.to), held:touchesProtected(spans, edit.from, edit.to) && !isNewCite(edit) }));
 }
 
 export function applyEdits(before, edits) {
@@ -70,9 +72,12 @@ export function applyEdits(before, edits) {
   return text;
 }
 
-// The chosen edits, checked as a whole: together they must leave every protected piece in place.
-export function safeResult(before, edits, { allowProtected = false } = {}) {
-  const text = applyEdits(before, edits);
-  if (!allowProtected && !keepsProtected(before, text)) throw new Error('These edits would change math, a citation or a command, so they were not applied.');
+// The chosen edits, checked as a whole: together they must leave every protected piece in place. `citeKeys` lets a
+// citation note add \cite commands for those keys; every other protected piece must still match.
+export function safeResult(before, edits, { citeKeys = [] } = {}) {
+  const text = applyEdits(before, edits), known = new Set(citeKeys);
+  const added = /\\(?:cite|citep|citet|autocite|parencite|textcite)\{([^{}]*)\}/g;
+  const withoutNew = !citeKeys.length ? text : text.replace(added, (whole, keys) => (before.includes(whole) || !keys.split(',').every(key => known.has(key.trim())) ? whole : ''));
+  if (!keepsProtected(before, withoutNew)) throw new Error('These edits would change math, a citation or a command, so they were not applied.');
   return text;
 }

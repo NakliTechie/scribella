@@ -16,7 +16,10 @@ function occurrences(text, needle) {
 }
 
 export function locate(text, anchor) {
-  if (text.slice(anchor.from, anchor.to) === anchor.quote) return { from:anchor.from, to:anchor.to };
+  const inPlace = text.slice(anchor.from, anchor.to) === anchor.quote
+    && text.slice(Math.max(0, anchor.from - anchor.prefix.length), anchor.from) === anchor.prefix
+    && text.slice(anchor.to, anchor.to + anchor.suffix.length) === anchor.suffix;
+  if (inPlace) return { from:anchor.from, to:anchor.to };
   const full = occurrences(text, anchor.prefix + anchor.quote + anchor.suffix);
   if (full.length === 1) return { from:full[0] + anchor.prefix.length, to:full[0] + anchor.prefix.length + anchor.quote.length };
   const bare = occurrences(text, anchor.quote);

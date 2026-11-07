@@ -11,8 +11,8 @@ export function stripComments(source) {
   for (const line of source.split('\n')) {
     // A comment environment is a note too, so it goes with its markers.
     if (hidden) { if (/\\end\{comment\}/.test(line)) hidden = false; continue; }
-    if (/^\s*\\begin\{comment\}/.test(line)) { removed += 1; hidden = !/\\end\{comment\}/.test(line); continue; }
     if (inside) { out.push(line); if (VERBATIM_END.test(line)) inside = false; continue; }
+    if (/^\s*\\begin\{comment\}/.test(line)) { removed += 1; hidden = !/\\end\{comment\}/.test(line); continue; }
     if (VERBATIM.test(line) && !VERBATIM_END.test(line)) { inside = true; out.push(line); continue; }
     // A % inside a URL or \\verb is text; those are masked so only a real comment on the line is found.
     const masked = line.replace(/\\(?:url|href)\{[^}]*\}|\\verb\*?(.).*?\1/g, match => ' '.repeat(match.length));
