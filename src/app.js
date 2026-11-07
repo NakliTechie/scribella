@@ -20,6 +20,7 @@ import { addFields, parseBib, sameWork, scanEntries, writeEntry } from './bib.js
 import { auditEntry, findPaper } from './lookup.js';
 import { checkPdf, checkSource } from './blind.js';
 import { formatLatex } from './format.js';
+import { checkSpelling } from './spell.js';
 import { parseBlg, parseLabels } from './aux.js';
 import { MAX_PASSAGE, buildMessages, parseReply, safeResult, wordEdits } from './revise.js';
 
@@ -67,6 +68,7 @@ const editor = createEditor($('editor'), {
   project:projectIndex,
   keys:readKeys(),
   onShow:() => showInPdf(),
+  spell:text => (/\.(tex|ltx|md|txt)$/i.test(state.path || '') ? checkSpelling(text).catch(error => { say(`Spellcheck failed: ${error.message}`, true); return []; }) : Promise.resolve([])),
   describeRef:key => {
     const label = state.labels?.get(key);
     return label ? `${key}: ${label.number || 'no number'}, page ${label.page}` : `${key}: not built yet`;
@@ -1015,6 +1017,21 @@ async function arxivPack() {
   return { ok:true, files:files.map(file => file.path), removed };
 }
 
+// A dragged divider sets one column width; widths are remembered per browser.
+function bindSplit(handle) {
+  const name = handle.dataset.column;
+  handle.addEventListener('pointerdown', start => {
+    handle.setPointerCapture(start.pointerId);
+    const left = $('workspace').getBoundingClientRect().left, rail = name === '--source' ? $('rail').offsetWidth : 0;
+    const move = event => $('workspace').style.setProperty(name, `${Math.max(140, event.clientX - left - rail)}px`);
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', () => {
+      handle.removeEventListener('pointermove', move);
+      try { localStorage.setItem(`scribella${name}`, $('workspace').style.getPropertyValue(name)); } catch (_) {}
+    }, { once:true });
+  });
+}
+
 function bindPage() {
   for (const [id, template] of Object.entries(TEMPLATES)) $('template').append(new Option(template.label, id));
   loadVenues().then(list => { venues = list; for (const [id, venue] of Object.entries(list)) $('template').append(new Option(venue.label, id)); }).catch(error => console.error('Templates failed to load', error));
@@ -1049,6 +1066,9 @@ function bindPage() {
     for (const [, other] of tabs) $(other).hidden = other !== pane;
     for (const [other] of tabs) $(other).setAttribute('aria-pressed', String(other === tab));
   });
+  $('spell').addEventListener('change', event => { editor.setSpell(event.target.checked); if (event.target.checked) say('Spellcheck downloads a 20 MB engine the first time.'); });
+  for (const handle of document.querySelectorAll('.split')) bindSplit(handle);
+  try { for (const name of ['--rail', '--source']) { const value = localStorage.getItem(`scribella${name}`); if (value) $('workspace').style.setProperty(name, value); } } catch (_) {}
   $('check-setup').addEventListener('click', () => checkSetup().catch(fail));
   $('format').addEventListener('click', () => formatFile().catch(fail));
   renderSteps();

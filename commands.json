@@ -38,7 +38,7 @@
           },
           "template": {
             "type": "string",
-            "description": "article, blank, neurips-2026, icml-2026, iclr-2026, acl or cvpr-2027"
+            "description": "article, beamer, ieee, acm, thesis, blank, neurips-2026, icml-2026, iclr-2026, acl or cvpr-2027"
           }
         },
         "required": [
@@ -453,6 +453,7 @@
     "check-fix": "person: applying a bibliography change is the person's own decision",
     "tab-checks": "view",
     "format": "file.format",
-    "check-setup": "setup.check"
+    "check-setup": "setup.check",
+    "spell": "view"
   }
 }

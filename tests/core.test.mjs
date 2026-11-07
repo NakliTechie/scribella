@@ -20,6 +20,7 @@ import { addFields, citeKey, cleanValue, parseBib, sameWork, scanEntries, writeE
 import { auditEntry, findPaper, fromCrossref, noticesOf } from '../src/lookup.js';
 import { checkPdf, checkSource } from '../src/blind.js';
 import { formatLatex } from '../src/format.js';
+import { maskLatex } from '../src/spell.js';
 import { parseBlg, parseLabels } from '../src/aux.js';
 import { cleanFilePath, loadVenues, createProject, findMain, listFiles, listProjects, readSettings } from '../src/project.js';
 
@@ -466,4 +467,11 @@ test('formatting changes only indentation, and leaves verbatim alone', () => {
 test('the .aux gives label numbers, and the bibliography log gives problems', () => {
   assert.deepEqual(parseLabels('\\newlabel{sec:a}{{2.1}{3}{Title}{section.2}{}}').get('sec:a'), { number:'2.1', page:'3' });
   assert.deepEqual(parseBlg('Warning--empty journal in x\nI found no database files\n').map(item => item.severity), ['warning', 'error']);
+});
+
+test('spellcheck sees prose only, with offsets unchanged', () => {
+  const text = 'A wrod $x_y$ \\cite{key} here';
+  const masked = maskLatex(text);
+  assert.equal(masked.length, text.length);
+  assert.ok(masked.includes('wrod') && !masked.includes('x_y') && !masked.includes('cite'));
 });
