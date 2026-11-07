@@ -5,6 +5,7 @@ const SETTINGS = '.scribella.json';
 const TEXT = /\.(tex|ltx|bib|sty|cls|bst|bbx|cbx|txt|md|csv|tsv)$/i;
 
 export const isText = path => TEXT.test(path);
+export const isImage = path => /\.(png|jpe?g|pdf|eps)$/i.test(path);
 export const projectFolder = name => `${ROOT}/${name}`;
 export const safeName = name => name.trim().replace(/[\\/:*?"<>|]+/g, '-').replace(/^\.+/, '').slice(0, 80);
 
@@ -91,3 +92,10 @@ export async function readSettings(store, name) {
 }
 
 export const writeSettings = (store, name, settings) => store.write(`${projectFolder(name)}/${SETTINGS}`, JSON.stringify(settings, null, 2));
+
+// The name a person gives a file: relative, with no hidden parts and no way out of the project.
+export function cleanFilePath(path) {
+  const clean = path.trim().replace(/^\/+/, '');
+  if (!clean || clean.split('/').some(part => part === '..' || part.startsWith('.') || !part)) throw new Error('A file name cannot be empty, start with a dot, or contain "..".');
+  return clean;
+}

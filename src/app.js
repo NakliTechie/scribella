@@ -1,15 +1,21 @@
 // Scribella's page: wires storage, the editor, builds and the PDF pane. Writing works everywhere; compiling needs the
 // NakliOS TeX service, because the engine lives there.
 import { browserStore, hostStore } from './storage.js';
-import { TEMPLATES, createProject, findMain, isText, listFiles, listProjects, projectFolder, readSettings, writeSettings } from './project.js';
+import { TEMPLATES, cleanFilePath, createProject, findMain, isImage, isText, listFiles, listProjects, projectFolder, readSettings, safeName, writeSettings } from './project.js';
 import { createBuilder } from './build.js';
 import { createEditor } from './editor.js';
 import { createPdfView } from './pdf-view.js';
 import { explain, visibleDiagnostics } from './explain.js';
 import { bibKeys, collectKeys } from './lint.js';
 import { buildOutline, wordCount } from './outline.js';
+import { findAll, findTodos, replaceAllIn } from './search.js';
+import { SYMBOLS, figureBlock, needsBooktabs, parseTable, slug, tableBlock } from './insert.js';
+import { makeZip, readZip } from './zip.js';
 
 const AUTOSAVE_MS = 1200;
+const OUTSIDE_EDIT_MS = 1500;
+const OWN_WRITE_MS = 4000;
+const KEYS_ITEM = 'scribella.keys';
 const $ = id => document.getElementById(id);
 const naklios = window.naklios;
 const hosted = () => !!(naklios?.capabilities?.hosted && naklios.capabilities.fs);
@@ -20,7 +26,9 @@ const COMPILE_HINT = () => (naklios?.capabilities?.hosted
 
 let store = null, storeKind = null;
 const state = { project:null, settings:{}, files:[], texts:{}, path:null, dirty:false, revision:0, problems:[], log:'', job:null, auto:true };
-let saveTimer = null;
+let saveTimer = null, outsideTimer = null, stopWatching = null;
+const ownWrites = new Map();
+const readKeys = () => { try { return localStorage.getItem(KEYS_ITEM) || 'default'; } catch (_) { return 'default'; } };
 
 const say = (text, bad = false) => { $('status').textContent = text; $('status').classList.toggle('bad', bad); };
 const pdf = createPdfView($('pdf'), { onPages:pages => { $('pages').textContent = `${pages} ${pages === 1 ? 'page' : 'pages'}`; } });
@@ -41,6 +49,8 @@ function projectIndex() {
 const editor = createEditor($('editor'), {
   path:() => state.path || '',
   project:projectIndex,
+  keys:readKeys(),
+  onDrop:(files, at) => dropFiles(files, at).catch(fail),
   onSave:() => saveNow().then(() => state.project && build()),
   onChange() {
     state.dirty = true;
@@ -54,12 +64,17 @@ const editor = createEditor($('editor'), {
 
 const fullPath = path => `${projectFolder(state.project)}/${path}`;
 
+function writeFile(path, data) {
+  ownWrites.set(path, Date.now());
+  return store.write(fullPath(path), data);
+}
+
 async function saveNow() {
   clearTimeout(saveTimer);
   if (!state.dirty || !state.path) return;
   state.dirty = false;
   try {
-    await store.write(fullPath(state.path), state.texts[state.path]);
+    await writeFile(state.path, state.texts[state.path]);
   } catch (error) {
     state.dirty = true;
     say(`Saving failed: ${error.message}`, true);
@@ -137,6 +152,15 @@ function renderProblems() {
     }
     go.addEventListener('click', () => jump(item.file, item.line, item.token).catch(fail));
     row.append(go);
+    if (item.engine && item.engine !== state.settings.engine) {
+      const change = document.createElement('button');
+      change.type = 'button';
+      change.className = 'btn small';
+      change.dataset.command = 'apply-fix';
+      change.textContent = 'Switch to XeLaTeX';
+      change.addEventListener('click', () => changeSettings({ engine:item.engine }).then(renderTree).catch(fail));
+      row.append(change);
+    }
     if (item.suggestion) {
       const fix = document.createElement('button');
       fix.type = 'button';
@@ -214,6 +238,31 @@ async function openFile(path) {
   renderTree();
 }
 
+// Edits from outside the page, such as an agent or another tab, reach the editor and start a build.
+async function outsideChange(event) {
+  const root = `${projectFolder(state.project)}/`;
+  const path = event.path?.startsWith(root) ? event.path.slice(root.length) : event.path;
+  if (!path || path.split('/').some(part => part.startsWith('.'))) return;
+  if (Date.now() - (ownWrites.get(path) ?? 0) < OWN_WRITE_MS) return;
+  state.files = await listFiles(store, state.project);
+  if (state.files.includes(path) && isText(path)) {
+    state.texts[path] = await store.read(fullPath(path));
+    if (path === state.path && !state.dirty) editor.load(state.texts[path]);
+  } else if (!state.files.includes(path)) delete state.texts[path];
+  renderTree();
+  showCounts();
+  state.revision += 1;
+  clearTimeout(outsideTimer);
+  outsideTimer = setTimeout(() => { if (state.auto) build(); }, OUTSIDE_EDIT_MS);
+}
+
+async function watchProject(name) {
+  stopWatching?.();
+  stopWatching = null;
+  if (storeKind !== 'host' || !naklios.fs.subscribe) return;
+  stopWatching = await naklios.fs.subscribe(projectFolder(name), event => { outsideChange(event).catch(fail); });
+}
+
 async function openProject(name) {
   await saveNow();
   pdf.clear();
@@ -232,6 +281,7 @@ async function openProject(name) {
   document.title = `${name} — Scribella`;
   await openFile(state.settings.main || state.files[0]);
   showCounts();
+  await watchProject(name).catch(error => console.error('Watching the project failed', error));
   const last = state.settings.main && `${projectFolder(name)}/.tex-build/${state.settings.main.replace(/^.*\//, '').replace(/\.[^.]+$/, '')}.pdf`;
   if (last && await store.exists(last)) await pdf.show(await store.readBinary(last));
   say(canCompile() ? 'Ready.' : COMPILE_HINT());
@@ -268,11 +318,9 @@ async function changeSettings(change) {
 }
 
 async function newFile() {
-  const path = $('new-file-name').value.trim().replace(/^\/+/, '');
-  if (!path) return;
-  if (path.split('/').some(part => part === '..' || part.startsWith('.'))) throw new Error('A file name cannot start with a dot or contain "..".');
+  const path = cleanFilePath($('new-file-name').value);
   if (state.files.includes(path)) throw new Error(`${path} already exists.`);
-  await store.write(fullPath(path), '');
+  await writeFile(path, '');
   state.files = await listFiles(store, state.project);
   state.texts[path] = '';
   $('new-file-name').value = '';
@@ -291,13 +339,138 @@ async function deleteFile() {
   await openFile(state.settings.main && state.files.includes(state.settings.main) ? state.settings.main : state.files[0]);
 }
 
+async function renameFile(from, to) {
+  const path = cleanFilePath(to);
+  if (state.files.includes(path)) throw new Error(`${path} already exists.`);
+  await saveNow();
+  await writeFile(path, await store.readBinary(fullPath(from)));
+  ownWrites.set(from, Date.now());
+  await store.remove(fullPath(from));
+  if (from in state.texts) { state.texts[path] = state.texts[from]; delete state.texts[from]; }
+  state.files = await listFiles(store, state.project);
+  if (state.settings.main === from) await changeSettings({ main:path });
+  if (state.path === from) state.path = null;
+  await openFile(state.path || path);
+  return path;
+}
+
+async function addFiles(files, folder = '') {
+  const added = [];
+  for (const file of files) {
+    const path = cleanFilePath(folder + file.name.replace(/[\\/]/g, '-'));
+    await writeFile(path, new Uint8Array(await file.arrayBuffer()));
+    if (isText(path)) state.texts[path] = await file.text();
+    added.push(path);
+  }
+  state.files = await listFiles(store, state.project);
+  renderTree();
+  showCounts();
+  return added;
+}
+
+async function dropFiles(files, at) {
+  const images = files.filter(file => isImage(file.name)), others = files.filter(file => !isImage(file.name));
+  for (const path of await addFiles(images, 'figures/')) editor.insert(figureBlock({ path }), at);
+  if (others.length) await addFiles(others);
+}
+
+async function exportProject() {
+  await saveNow();
+  const files = await Promise.all(state.files.map(async path => ({ path, bytes:await store.readBinary(fullPath(path)) })));
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(new Blob([makeZip(files)], { type:'application/zip' }));
+  link.download = `${safeName(state.project)}.zip`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 10000);
+  say(`Exported ${files.length} files.`);
+}
+
+async function importProject(file) {
+  const files = readZip(new Uint8Array(await file.arrayBuffer()));
+  if (!files.length) throw new Error('This zip holds no files.');
+  const name = safeName(file.name.replace(/\.zip$/i, '')) || 'Imported';
+  const existing = await listProjects(store);
+  let unique = name;
+  for (let copy = 2; existing.includes(unique); copy += 1) unique = `${name} ${copy}`;
+  for (const { path, bytes } of files) await store.write(`${projectFolder(unique)}/${path}`, bytes);
+  await writeSettings(store, unique, { engine:'pdflatex' });
+  await openProject(unique);
+}
+
+const searchOptions = () => ({ regex:$('search-regex').checked, matchCase:$('search-case').checked });
+
+function showMatches(matches) {
+  $('search-count').textContent = `${matches.length}${matches.length >= 500 ? '+' : ''} ${matches.length === 1 ? 'match' : 'matches'}`;
+  $('search-results').replaceChildren(...matches.map(item => {
+    const row = document.createElement('li');
+    const go = document.createElement('button');
+    go.type = 'button';
+    go.className = 'row';
+    go.dataset.command = 'search-result';
+    go.title = item.text;
+    go.textContent = `${item.file}:${item.line} ${item.text}`;
+    go.addEventListener('click', () => jump(item.file, item.line, item.match).catch(fail));
+    row.append(go);
+    return row;
+  }));
+}
+
+function runSearch() {
+  try { showMatches(findAll(state.texts, $('search-query').value, searchOptions())); }
+  catch (error) { $('search-count').textContent = `Bad pattern: ${error.message}`; }
+}
+
+async function replaceEverywhere(query, replacement, options) {
+  let total = 0;
+  for (const path of Object.keys(state.texts)) {
+    const { text, count } = replaceAllIn(state.texts[path], query, replacement, options);
+    if (!count) continue;
+    total += count;
+    state.texts[path] = text;
+    await writeFile(path, text);
+    if (path === state.path) editor.load(text);
+  }
+  state.revision += 1;
+  showCounts();
+  if (total && state.auto) build();
+  return total;
+}
+
+function openPalette() {
+  const filter = $('symbol-filter').value.trim().toLowerCase();
+  $('symbols').replaceChildren(...SYMBOLS.flatMap(({ group, names }) => {
+    const shown = names.filter(name => name.toLowerCase().includes(filter));
+    if (!shown.length) return [];
+    const heading = document.createElement('h2');
+    heading.textContent = group;
+    return [heading, ...shown.map(name => {
+      const pick = document.createElement('button');
+      pick.type = 'button';
+      pick.className = 'btn small';
+      pick.dataset.command = 'insert-symbol';
+      pick.textContent = `\\${name}`;
+      pick.addEventListener('click', () => { $('palette-dialog').close(); editor.insert(`\\${name}`); });
+      return pick;
+    })];
+  }));
+}
+
+async function insertTable() {
+  const rows = parseTable($('table-data').value);
+  if (!rows.length) throw new Error('Paste some rows first.');
+  const caption = $('table-caption').value.trim();
+  editor.insert(tableBlock(rows, { caption, label:slug(caption || 'table') }));
+  $('table-dialog').close();
+  if (needsBooktabs(state.texts[state.settings.main] || '')) say('Add \\usepackage{booktabs} to the preamble for this table.', true);
+}
+
 function bindPage() {
   for (const [id, template] of Object.entries(TEMPLATES)) $('template').append(new Option(template.label, id));
   $('new-project').addEventListener('submit', event => {
     event.preventDefault();
     createProject(store, $('project-title').value, $('template').value).then(openProject).catch(fail);
   });
-  $('home').addEventListener('click', () => saveNow().then(() => { state.project = null; state.path = null; return chooseStore(); }).then(renderHome).catch(fail));
+  $('home').addEventListener('click', () => saveNow().then(() => { stopWatching?.(); stopWatching = null; state.project = null; state.path = null; return chooseStore(); }).then(renderHome).catch(fail));
   $('build').addEventListener('click', () => saveNow().then(build).catch(fail));
   $('cancel').addEventListener('click', () => { if (state.job) naklios.experimental_tex.cancel(state.job.id); });
   $('auto').addEventListener('change', event => { state.auto = event.target.checked; });
@@ -308,6 +481,38 @@ function bindPage() {
   $('add-file').addEventListener('click', () => { $('new-file-form').hidden = false; $('new-file-name').focus(); });
   $('new-file-form').addEventListener('submit', event => { event.preventDefault(); newFile().catch(fail); });
   $('delete-file').addEventListener('click', () => deleteFile().catch(fail));
+  $('rename-file').addEventListener('click', () => {
+    const next = prompt('New file name', state.path);
+    if (next && next !== state.path) renameFile(state.path, next).catch(fail);
+  });
+  $('add-files').addEventListener('change', event => { addFiles([...event.target.files]).catch(fail); event.target.value = ''; });
+  $('export').addEventListener('click', () => exportProject().catch(fail));
+  $('import-zip').addEventListener('change', event => { const [file] = event.target.files; event.target.value = ''; if (file) importProject(file).catch(fail); });
+  $('search-query').addEventListener('input', runSearch);
+  $('search-regex').addEventListener('change', runSearch);
+  $('search-case').addEventListener('change', runSearch);
+  $('search-todos').addEventListener('click', () => showMatches(findTodos(state.texts)));
+  $('replace-all').addEventListener('click', () => {
+    const query = $('search-query').value, matches = findAll(state.texts, query, searchOptions());
+    if (!matches.length || !confirm(`Replace ${matches.length} matches across the project?`)) return;
+    replaceEverywhere(query, $('search-replace').value, searchOptions()).then(count => { say(`Replaced ${count}.`); runSearch(); }).catch(fail);
+  });
+  $('insert').addEventListener('change', event => {
+    const pick = event.target.value;
+    event.target.value = '';
+    if (pick === 'table') $('table-dialog').showModal();
+    if (pick === 'symbol') { openPalette(); $('palette-dialog').showModal(); }
+    if (pick === 'figure') $('figure-file').click();
+  });
+  $('figure-file').addEventListener('change', event => { const files = [...event.target.files]; event.target.value = ''; dropFiles(files, editor.view.state.selection.main.head).catch(fail); });
+  $('symbol-filter').addEventListener('input', openPalette);
+  $('table-form').addEventListener('submit', event => { event.preventDefault(); insertTable().catch(fail); });
+  for (const button of document.querySelectorAll('[data-close]')) button.addEventListener('click', () => button.closest('dialog').close());
+  $('keys').value = readKeys();
+  $('keys').addEventListener('change', event => {
+    editor.setKeys(event.target.value);
+    try { localStorage.setItem(KEYS_ITEM, event.target.value); } catch (_) {}
+  });
   addEventListener('pagehide', () => { saveNow().catch(() => {}); });
 }
 
@@ -318,7 +523,7 @@ const commands = {
   'files.list':() => state.files,
   'file.read':({ path }) => state.texts[path] ?? store.read(fullPath(path)),
   async 'file.write'({ path, text }) {
-    await store.write(fullPath(path), text);
+    await writeFile(path, text);
     state.texts[path] = text;
     state.files = await listFiles(store, state.project);
     if (path === state.path) editor.load(text);
@@ -333,6 +538,10 @@ const commands = {
     $('build').hidden = false; $('cancel').hidden = true;
     return { ok:result.ok, problems:state.problems.map(({ severity, file, line, headline, explanation }) => ({ severity, file, line, headline, explanation })) };
   },
+  async 'file.rename'({ from, to }) { return { renamed:await renameFile(from, to) }; },
+  'search.find':({ query, regex, matchCase }) => findAll(state.texts, query, { regex, matchCase }),
+  'search.todos':() => findTodos(state.texts),
+  async 'search.replace'({ query, replacement, regex, matchCase }) { return { replaced:await replaceEverywhere(query, replacement, { regex, matchCase }) }; },
   'problems.list':() => state.problems.map(({ severity, file, line, headline, explanation, suggestion }) => ({ severity, file, line, headline, explanation, suggestion })),
 };
 

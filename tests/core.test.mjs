@@ -5,7 +5,10 @@ import { bibKeys, blankComments, collectKeys, lintSource } from '../src/lint.js'
 import { buildOutline, wordCount } from '../src/outline.js';
 import { createBuilder } from '../src/build.js';
 import { memoryStore } from '../src/storage.js';
-import { createProject, findMain, listFiles, listProjects, readSettings } from '../src/project.js';
+import { findAll, findTodos, replaceAllIn } from '../src/search.js';
+import { figureBlock, needsBooktabs, parseTable, tableBlock } from '../src/insert.js';
+import { makeZip, readZip } from '../src/zip.js';
+import { cleanFilePath, createProject, findMain, listFiles, listProjects, readSettings } from '../src/project.js';
 
 test('an unknown command gets a one-click fix when it is a near typo', () => {
   const source = 'a \\citep{x} b \\citep{y}\nc \\cietp{z}\n';
@@ -121,4 +124,55 @@ test('projects are created once, and hidden files stay out of the tree', async (
 test('the main file is the one with \\documentclass', () => {
   assert.equal(findMain(['a.tex', 'paper.tex'], { 'a.tex':'text', 'paper.tex':'\\documentclass{x}' }), 'paper.tex');
   assert.equal(findMain(['b.tex', 'main.tex'], { 'b.tex':'\\documentclass{x}', 'main.tex':'\\documentclass{x}' }), 'main.tex');
+});
+
+test('search finds across files, and a bad case filter misses', () => {
+  const texts = { 'a.tex':'Hello world\nhello', 'b.tex':'nothing' };
+  assert.equal(findAll(texts, 'hello').length, 2);
+  assert.equal(findAll(texts, 'hello', { matchCase:true }).length, 1);
+  assert.deepEqual(findAll(texts, 'w.r', { regex:true }).map(item => [item.file, item.line, item.column]), [['a.tex', 1, 6]]);
+  assert.equal(findAll(texts, 'w.r').length, 0, 'plain search treats dots as dots');
+  assert.deepEqual(findAll(texts, ''), []);
+});
+
+test('replace counts, and a regex may use groups', () => {
+  assert.deepEqual(replaceAllIn('a b a', 'a', '$1'), { text:'$1 b $1', count:2 });
+  assert.deepEqual(replaceAllIn('x=1, y=2', '(\\w)=(\\d)', '$2:$1', { regex:true }), { text:'1:x, 2:y', count:2 });
+});
+
+test('the TODO scan reads comments and \\todo in TeX files only', () => {
+  const found = findTodos({ 'a.tex':'% TODO fix\nplain TODO text\n\\todo{later}\n', 'n.md':'% TODO no' });
+  assert.deepEqual(found.map(item => item.line), [1, 3]);
+});
+
+test('tables escape cells, right-align numbers and handle quotes and tabs', () => {
+  assert.deepEqual(parseTable('a,"b,c"\n1,2\n'), [['a', 'b,c'], ['1', '2']]);
+  assert.deepEqual(parseTable('a\tb,c\n'), [['a', 'b,c']]);
+  const block = tableBlock([['Name', 'Score'], ['A_1 & co', '50%'], ['B', '7']], { caption:'C', label:'c' });
+  assert.match(block, /\{lr\}/);
+  assert.ok(block.includes('A\\_1 \\& co & 50\\%'));
+  assert.match(block, /\\toprule/);
+  assert.equal(needsBooktabs('\\usepackage{a,booktabs}'), false);
+  assert.equal(needsBooktabs('\\usepackage{a}'), true);
+  assert.match(figureBlock({ path:'figures/My Plot.png' }), /fig:my-plot/);
+});
+
+test('zips round trip, lose one top folder, and refuse unsafe paths', () => {
+  const bytes = new TextEncoder().encode('x');
+  assert.deepEqual(readZip(makeZip([{ path:'paper/main.tex', bytes }, { path:'paper/fig/a.png', bytes }])).map(file => file.path).sort(), ['fig/a.png', 'main.tex']);
+  assert.deepEqual(readZip(makeZip([{ path:'main.tex', bytes }, { path:'b/c.tex', bytes }])).map(file => file.path).sort(), ['b/c.tex', 'main.tex']);
+  assert.deepEqual(readZip(makeZip([{ path:'main.tex', bytes }, { path:'.git/config', bytes }, { path:'__MACOSX/x', bytes }])).map(file => file.path), ['main.tex']);
+  assert.throws(() => readZip(makeZip([{ path:'../evil', bytes }])), /unsafe/);
+});
+
+test('file names stay inside the project', () => {
+  assert.equal(cleanFilePath(' /a/b.tex '), 'a/b.tex');
+  for (const bad of ['', '../x', 'a/.git', 'a//b']) assert.throws(() => cleanFilePath(bad));
+});
+
+test('engine advice and letter-case checks', () => {
+  assert.equal(explain({ kind:'tex', message:'Fatal Package fontspec Error: The fontspec package requires either XeTeX or LuaTeX.' }).engine, 'xelatex');
+  assert.equal(explain({ kind:'tex', message:'Unicode character 你 (U+4F60)' }).engine, 'xelatex');
+  const project = { labels:new Set(), bibKeys:new Set(), hasBib:false, files:new Set(['Sections/Intro.tex']) };
+  assert.match(lintSource('\\input{sections/intro}', project, 'main.tex')[0].message, /letter case/);
 });

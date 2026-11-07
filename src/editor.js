@@ -1,5 +1,5 @@
 // The source editor: CodeMirror with LaTeX highlighting, the linter and project-aware completion.
-import { EditorView, EditorState, StreamLanguage, autocompletion, basicSetup, indentWithTab, keymap, lintGutter, linter, stex } from '../vendor/codemirror.mjs';
+import { Compartment, EditorView, EditorState, StreamLanguage, autocompletion, basicSetup, emacs, hoverTooltip, indentWithTab, keymap, lintGutter, linter, stex, vim } from '../vendor/codemirror.mjs';
 import { lintSource } from './lint.js';
 
 const COMMANDS = ['section', 'subsection', 'subsubsection', 'paragraph', 'label', 'ref', 'eqref', 'cite', 'citep', 'citet', 'caption', 'centering', 'includegraphics', 'usepackage', 'textbf', 'textit', 'emph', 'texttt', 'footnote', 'item', 'input', 'include', 'bibliography', 'bibliographystyle', 'newcommand', 'renewcommand', 'frac', 'sqrt', 'sum', 'int', 'mathbb', 'mathbf', 'mathcal', 'mathrm', 'left', 'right', 'url', 'href', 'maketitle', 'tableofcontents', 'appendix'];
@@ -29,20 +29,56 @@ function completions(project) {
   };
 }
 
-export function createEditor(parent, { onChange, onSave, project, path }) {
+// The formula under the pointer, as { from, to, tex }, or null.
+export function mathAt(text, pos) {
+  for (const match of text.matchAll(/\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\begin\{(equation|align|gather)\*?\}([\s\S]+?)\\end\{\3\*?\}|(?<![\\$])\$([^$\n]+?)\$/g)) {
+    const to = match.index + match[0].length;
+    if (match.index > pos) return null;
+    if (pos <= to) {
+      const tex = match[1] ?? match[2] ?? match[5] ?? match[4].replace(/\\label\{[^}]*\}/g, '');
+      return { from:match.index, to, tex:match[3] === 'align' ? `\\begin{aligned}${tex}\\end{aligned}` : tex };
+    }
+  }
+  return null;
+}
+
+const mathHover = hoverTooltip(async (view, pos) => {
+  const found = mathAt(view.state.doc.toString(), pos);
+  if (!found) return null;
+  const { default:katex } = await import('../vendor/katex.mjs');
+  return { pos:found.from, end:found.to, above:true, create() {
+    const dom = document.createElement('div');
+    dom.className = 'math-tip';
+    dom.innerHTML = katex.renderToString(found.tex, { displayMode:true, output:'mathml', throwOnError:false });
+    return { dom };
+  } };
+});
+
+export function createEditor(parent, { onChange, onSave, onDrop, project, path, keys = 'default' }) {
   let quiet = false;
+  const keyMode = new Compartment();
+  const keysFor = mode => (mode === 'vim' ? vim() : mode === 'emacs' ? emacs() : []);
   const view = new EditorView({
     parent,
     state:EditorState.create({
       doc:'',
       extensions:[
+        keyMode.of(keysFor(keys)),
         basicSetup,
+        mathHover,
         StreamLanguage.define(stex),
         EditorView.lineWrapping,
         keymap.of([indentWithTab, { key:'Mod-s', preventDefault:true, run:() => { onSave(); return true; } }]),
         lintGutter(),
         linter(current => (/\.(tex|ltx)$/i.test(path()) ? lintSource(current.state.doc.toString(), project(), path()) : []), { delay:400 }),
         autocompletion({ override:[completions(project)] }),
+        EditorView.domEventHandlers({ drop(event, current) {
+          const files = [...(event.dataTransfer?.files || [])];
+          if (!files.length) return false;
+          event.preventDefault();
+          onDrop(files, current.posAtCoords({ x:event.clientX, y:event.clientY }) ?? current.state.selection.main.head);
+          return true;
+        } }),
         EditorView.updateListener.of(update => { if (update.docChanged && !quiet) onChange(); }),
       ],
     }),
@@ -54,6 +90,11 @@ export function createEditor(parent, { onChange, onSave, project, path }) {
       quiet = true;
       view.dispatch({ changes:{ from:0, to:view.state.doc.length, insert:text }, selection:{ anchor:0 } });
       quiet = false;
+    },
+    setKeys(mode) { view.dispatch({ effects:keyMode.reconfigure(keysFor(mode)) }); },
+    insert(text, at = view.state.selection.main.head) {
+      view.dispatch({ changes:{ from:at, to:at === view.state.selection.main.head ? view.state.selection.main.to : at, insert:text }, selection:{ anchor:at + text.length } });
+      view.focus();
     },
     goToLine(line, token) {
       const target = view.state.doc.line(Math.min(Math.max(line, 1), view.state.doc.lines));
