@@ -62,6 +62,12 @@ export async function byArxiv(id, load = fetch) {
   return getJson(`${OPENALEX}/doi:10.48550/arXiv.${encodeURIComponent(id)}`, load);
 }
 
+// Papers on a topic, best match first.
+export async function discover(query, load = fetch) {
+  const reply = await getJson(`${OPENALEX}?per-page=10&search=${encodeURIComponent(query)}`, load);
+  return (reply?.results || []).map(work => ({ ...fromOpenAlex(work), cited:work.cited_by_count ?? 0 }));
+}
+
 // Reads an arXiv id, DOI or title, and answers one BibTeX record, or null.
 export async function findPaper(input, load = fetch) {
   const text = input.trim();

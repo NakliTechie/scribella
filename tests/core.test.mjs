@@ -20,7 +20,10 @@ import { addFields, citeKey, cleanValue, parseBib, sameWork, scanEntries, writeE
 import { auditEntry, findPaper, fromCrossref, noticesOf } from '../src/lookup.js';
 import { checkPdf, checkSource } from '../src/blind.js';
 import { formatLatex } from '../src/format.js';
-import { maskLatex } from '../src/spell.js';
+import { keepProse, maskLatex } from '../src/spell.js';
+import { annotatePdf, annotationCount } from '../src/review-pdf.js';
+import { PDFDocument } from '../vendor/pdf-lib/pdf-lib.esm.js';
+import { discover } from '../src/lookup.js';
 import { parseBlg, parseLabels } from '../src/aux.js';
 import { cleanFilePath, loadVenues, createProject, findMain, listFiles, listProjects, readSettings } from '../src/project.js';
 
@@ -482,4 +485,23 @@ test('review fixes: multi-line authors, Verbatim blocks and starred citations', 
   assert.equal(formatLatex(code), code);
   const before = 'A claim here.', next = 'A claim \\citep[see][p. 2]{k1} here.';
   assert.equal(safeResult(before, wordEdits(before, next), { citeKeys:['k1'] }), next);
+});
+
+test('findings beside blanked LaTeX are dropped', () => {
+  const text = 'A wrod. $x$ is fine';
+  assert.deepEqual(keepProse(text, [{ from:2, to:6 }, { from:9, to:12 }, { from:12, to:14 }]).map(item => item.from), [2]);
+});
+
+test('notes land as real PDF annotations', async () => {
+  const pdf = await PDFDocument.create();
+  pdf.addPage([600, 800]);
+  const bytes = await annotatePdf(await pdf.save(), [{ page:1, x:100, y:100, text:'Fix this' }, { page:1, x:100, y:200, text:'And this' }]);
+  assert.equal(await annotationCount(bytes), 2);
+});
+
+test('discovery lists papers with counts', async () => {
+  const load = async () => new Response(JSON.stringify({ results:[{ title:'T', authorships:[{ author:{ display_name:'Ada Lovelace' } }], publication_year:2020, cited_by_count:7 }] }));
+  const found = await discover('x', load);
+  assert.equal(found[0].cited, 7);
+  assert.equal(found[0].fields.author, 'Lovelace, Ada');
 });
