@@ -188,6 +188,50 @@
           "replacement"
         ]
       }
+    },
+    {
+      "name": "pdf.locate",
+      "description": "Find where a source line of the open Scribella project lands in the PDF.",
+      "scope": "read",
+      "input": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "line": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "path",
+          "line"
+        ]
+      }
+    },
+    {
+      "name": "pdf.source",
+      "description": "Find the source line behind a point of the Scribella PDF, in PDF points from the top left of the page.",
+      "scope": "read",
+      "input": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "number"
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "page",
+          "x",
+          "y"
+        ]
+      }
     }
   ],
   "parity": {
@@ -220,6 +264,8 @@
     "insert-symbol": "file.write",
     "symbol-filter": "view",
     "insert-table": "file.write",
-    "keys": "view"
+    "keys": "view",
+    "show-in-pdf": "pdf.locate",
+    "pdf-find": "view"
   }
 }

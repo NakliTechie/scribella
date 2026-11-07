@@ -6,8 +6,9 @@ import { buildOutline, wordCount } from '../src/outline.js';
 import { createBuilder } from '../src/build.js';
 import { memoryStore } from '../src/storage.js';
 import { findAll, findTodos, replaceAllIn } from '../src/search.js';
-import { figureBlock, needsBooktabs, parseTable, tableBlock } from '../src/insert.js';
+import { escapeText, figureBlock, needsBooktabs, parseTable, tableBlock } from '../src/insert.js';
 import { makeZip, readZip } from '../src/zip.js';
+import { forward, inverse, parseSynctex } from '../src/synctex.js';
 import { cleanFilePath, createProject, findMain, listFiles, listProjects, readSettings } from '../src/project.js';
 
 test('an unknown command gets a one-click fix when it is a near typo', () => {
@@ -175,4 +176,58 @@ test('engine advice and letter-case checks', () => {
   assert.equal(explain({ kind:'tex', message:'Unicode character 你 (U+4F60)' }).engine, 'xelatex');
   const project = { labels:new Set(), bibKeys:new Set(), hasBib:false, files:new Set(['Sections/Intro.tex']) };
   assert.match(lintSource('\\input{sections/intro}', project, 'main.tex')[0].message, /letter case/);
+});
+
+const SYNC = `SyncTeX Version:1
+Input:1:main.tex
+Input:2:/texlive/article.cls
+Input:3:sections/two.tex
+Output:pdf
+Magnification:1000
+Unit:1
+X Offset:0
+Y Offset:0
+Content:
+{1
+[1,1:0,0:30000000,40000000,0
+(1,10:6578176,6578176:13156352,657817,131563
+h1,11:6578176,7894000:6578176,657817,131563
+x1,12:6578176,9000000
+k2,5:100,100:50
+)
+]
+}1
+{2
+(3,4:6578176,6578176:6578176,657817,131563
+x3,4:=,=
+)
+}2
+Postamble:
+`;
+
+test('SyncTeX: a source line finds its page and box', () => {
+  const sync = parseSynctex(SYNC);
+  const box = forward(sync, 'main.tex', 11);
+  assert.equal(box.page, 1);
+  assert.equal(box.line, 11);
+  assert.equal(Math.round(box.x), 100);
+  assert.equal(forward(sync, 'sections/two.tex', 4).page, 2);
+  assert.equal(forward(sync, 'main.tex', 500).line, 12, 'a line past the output falls back to the last line with output');
+  assert.equal(forward(sync, 'other.tex', 1), null);
+});
+
+test('SyncTeX: a point finds its line, and TeX Live files are skipped', () => {
+  const sync = parseSynctex(SYNC);
+  assert.deepEqual(inverse(sync, 1, 110, 118), { file:'main.tex', line:11 });
+  assert.deepEqual(inverse(sync, 2, 110, 100), { file:'sections/two.tex', line:4 });
+  assert.equal(inverse(sync, 9, 1, 1), null);
+});
+
+test('special characters are escaped once, in cells and captions', () => {
+  assert.equal(escapeText('a\\b_c%'), 'a\\textbackslash{}b\\_c\\%');
+  assert.ok(tableBlock([['A'], ['1']], { caption:'50% of a_b' }).includes('\\caption{50\\% of a\\_b}'));
+});
+
+test('LuaLaTeX-only packages ask for LuaLaTeX', () => {
+  assert.equal(explain({ kind:'tex', message:'Package foo Error: This package requires LuaTeX.' }).engine, 'lualatex');
 });

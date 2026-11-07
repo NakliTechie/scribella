@@ -30,17 +30,18 @@ export function parseTable(text) {
   });
 }
 
-const escapeCell = cell => cell.replace(/\\/g, '\\textbackslash{}').replace(/([&%$#_{}])/g, '\\$1').replace(/~/g, '\\textasciitilde{}').replace(/\^/g, '\\textasciicircum{}');
+const SPECIAL = { '\\':'\\textbackslash{}', '~':'\\textasciitilde{}', '^':'\\textasciicircum{}' };
+export const escapeText = text => text.replace(/[\\~^&%$#_{}]/g, char => SPECIAL[char] ?? `\\${char}`);
 const isNumber = cell => /^[-+]?\d[\d,]*(\.\d+)?%?$/.test(cell);
 
 export function tableBlock(rows, { caption = '', label = 'table' } = {}) {
   const width = Math.max(...rows.map(row => row.length));
   const body = rows.slice(1);
   const columns = Array.from({ length:width }, (_, index) => (body.length && body.every(row => !row[index] || isNumber(row[index])) ? 'r' : 'l')).join('');
-  const line = row => `    ${Array.from({ length:width }, (_, index) => escapeCell(row[index] ?? '')).join(' & ')} \\\\`;
+  const line = row => `    ${Array.from({ length:width }, (_, index) => escapeText(row[index] ?? '')).join(' & ')} \\\\`;
   return `\\begin{table}[t]
   \\centering
-  \\caption{${caption}}
+  \\caption{${escapeText(caption)}}
   \\label{tab:${label}}
   \\begin{tabular}{${columns}}
     \\toprule

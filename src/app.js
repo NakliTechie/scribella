@@ -11,10 +11,10 @@ import { buildOutline, wordCount } from './outline.js';
 import { findAll, findTodos, replaceAllIn } from './search.js';
 import { SYMBOLS, figureBlock, needsBooktabs, parseTable, slug, tableBlock } from './insert.js';
 import { makeZip, readZip } from './zip.js';
+import { forward, inverse, readSynctex } from './synctex.js';
 
 const AUTOSAVE_MS = 1200;
 const OUTSIDE_EDIT_MS = 1500;
-const OWN_WRITE_MS = 4000;
 const KEYS_ITEM = 'scribella.keys';
 const $ = id => document.getElementById(id);
 const naklios = window.naklios;
@@ -25,13 +25,15 @@ const COMPILE_HINT = () => (naklios?.capabilities?.hosted
   : 'Writing works here. To compile, open Scribella inside NakliOS, where the TeX engine runs.');
 
 let store = null, storeKind = null;
-const state = { project:null, settings:{}, files:[], texts:{}, path:null, dirty:false, revision:0, problems:[], log:'', job:null, auto:true };
+const state = { sync:null, builtRevision:null, findHits:[], findIndex:-1, project:null, settings:{}, files:[], texts:{}, path:null, dirty:false, revision:0, problems:[], log:'', job:null, auto:true };
 let saveTimer = null, outsideTimer = null, stopWatching = null;
-const ownWrites = new Map();
 const readKeys = () => { try { return localStorage.getItem(KEYS_ITEM) || 'default'; } catch (_) { return 'default'; } };
 
 const say = (text, bad = false) => { $('status').textContent = text; $('status').classList.toggle('bad', bad); };
-const pdf = createPdfView($('pdf'), { onPages:pages => { $('pages').textContent = `${pages} ${pages === 1 ? 'page' : 'pages'}`; } });
+const pdf = createPdfView($('pdf'), {
+  onPages:pages => { $('pages').textContent = `${pages} ${pages === 1 ? 'page' : 'pages'}`; },
+  onPoint:point => goToSource(point).catch(fail),
+});
 
 function projectIndex() {
   const labels = new Set(), keys = new Set(), macros = new Set();
@@ -50,9 +52,11 @@ const editor = createEditor($('editor'), {
   path:() => state.path || '',
   project:projectIndex,
   keys:readKeys(),
+  onShow:() => showInPdf(),
   onDrop:(files, at) => dropFiles(files, at).catch(fail),
   onSave:() => saveNow().then(() => state.project && build()),
   onChange() {
+    if (!editingText()) return;
     state.dirty = true;
     state.texts[state.path] = editor.text;
     state.revision += 1;
@@ -64,10 +68,10 @@ const editor = createEditor($('editor'), {
 
 const fullPath = path => `${projectFolder(state.project)}/${path}`;
 
-function writeFile(path, data) {
-  ownWrites.set(path, Date.now());
-  return store.write(fullPath(path), data);
-}
+const writeFile = (path, data) => store.write(fullPath(path), data);
+const sameName = (a, b) => a.toLowerCase() === b.toLowerCase();
+const fileExists = path => state.files.find(file => sameName(file, path));
+const editingText = () => !!state.path && isText(state.path);
 
 async function saveNow() {
   clearTimeout(saveTimer);
@@ -157,7 +161,7 @@ function renderProblems() {
       change.type = 'button';
       change.className = 'btn small';
       change.dataset.command = 'apply-fix';
-      change.textContent = 'Switch to XeLaTeX';
+      change.textContent = `Switch to ${item.engine === 'lualatex' ? 'LuaLaTeX' : 'XeLaTeX'}`;
       change.addEventListener('click', () => changeSettings({ engine:item.engine }).then(renderTree).catch(fail));
       row.append(change);
     }
@@ -196,12 +200,16 @@ async function compile() {
   try { return await state.job; } finally { state.job = null; }
 }
 
-async function afterBuild({ result, stale }) {
+async function afterBuild({ result, stale, revision = state.revision }) {
   const log = result.log ? await store.read(result.log).catch(() => '') : '';
   state.log = log;
   state.problems = visibleDiagnostics(result.diagnostics).map(item => ({ ...item, ...explain(item, { log, source:state.texts[item.file] || '' }) }));
   renderProblems();
-  if (result.pdf && result.ok) await pdf.show(await store.readBinary(result.pdf));
+  if (result.pdf && result.ok) {
+    await pdf.show(await store.readBinary(result.pdf));
+    state.sync = result.synctex ? await readSynctex(await store.readBinary(result.synctex)).catch(() => null) : null;
+    state.builtRevision = revision;
+  }
   const errors = state.problems.filter(item => item.severity === 'error').length;
   if (result.ok) say(stale ? 'Built. More edits are waiting.' : 'Built.');
   else say(pdf.pages ? `TeX stopped with ${errors} ${errors === 1 ? 'error' : 'errors'}. The last good PDF stays on screen.` : `TeX stopped with ${errors} ${errors === 1 ? 'error' : 'errors'}.`, true);
@@ -224,8 +232,41 @@ function build() {
   builder.request(state.revision);
 }
 
+// Lines move as you type, so a jump only trusts a PDF built from the text on screen.
+const syncReady = () => {
+  if (!state.sync) { say('Build the paper first.'); return false; }
+  if (state.builtRevision !== state.revision) { say('The source changed since this PDF. Build, then jump.'); return false; }
+  return true;
+};
+
+function showInPdf() {
+  if (!syncReady()) return null;
+  const box = forward(state.sync, state.path, editor.currentLine);
+  if (!box || !pdf.reveal(box)) { say(`No PDF output for ${state.path} line ${editor.currentLine}.`); return null; }
+  return box;
+}
+
+async function goToSource({ page, x, y }) {
+  if (!syncReady()) return null;
+  const place = inverse(state.sync, page, x, y);
+  if (!place) { say('Nothing in your project made this spot.'); return null; }
+  await jump(place.file, place.line);
+  return place;
+}
+
+async function findInPdf(step = 0) {
+  const query = $('pdf-find').value;
+  if (query !== state.findQuery) { state.findQuery = query; state.findHits = await pdf.find(query); state.findIndex = -1; }
+  const hits = state.findHits;
+  if (!hits.length) { $('pdf-hits').textContent = query ? 'No matches' : ''; return; }
+  state.findIndex = (state.findIndex + (step || 1) + hits.length) % hits.length;
+  $('pdf-hits').textContent = `${state.findIndex + 1} of ${hits.length}`;
+  pdf.reveal(hits[state.findIndex]);
+}
+
 async function openFile(path) {
   await saveNow();
+  clearTimeout(saveTimer);
   state.path = path;
   $('file-name').textContent = path;
   const text = isText(path);
@@ -243,11 +284,21 @@ async function outsideChange(event) {
   const root = `${projectFolder(state.project)}/`;
   const path = event.path?.startsWith(root) ? event.path.slice(root.length) : event.path;
   if (!path || path.split('/').some(part => part.startsWith('.'))) return;
-  if (Date.now() - (ownWrites.get(path) ?? 0) < OWN_WRITE_MS) return;
   state.files = await listFiles(store, state.project);
   if (state.files.includes(path) && isText(path)) {
-    state.texts[path] = await store.read(fullPath(path));
-    if (path === state.path && !state.dirty) editor.load(state.texts[path]);
+    const text = await store.read(fullPath(path));
+    // Our own saves arrive here too; they match what we hold.
+    if (text === state.texts[path]) return;
+    if (path === state.path && state.dirty) {
+      const copy = `${path}.outside.txt`;
+      await writeFile(copy, text);
+      state.files = await listFiles(store, state.project);
+      state.texts[copy] = text;
+      say(`${path} changed outside while you were typing. Your text stays here, and the other version is in ${copy}.`, true);
+    } else {
+      state.texts[path] = text;
+      if (path === state.path) editor.load(text);
+    }
   } else if (!state.files.includes(path)) delete state.texts[path];
   renderTree();
   showCounts();
@@ -274,6 +325,9 @@ async function openProject(name) {
   for (const path of state.files.filter(isText)) state.texts[path] = await store.read(fullPath(path));
   state.settings.main = state.files.includes(state.settings.main) ? state.settings.main : findMain(state.files, state.texts);
   state.problems = [];
+  state.sync = null;
+  state.builtRevision = null;
+  state.findQuery = '';
   renderProblems();
   document.body.dataset.view = 'project';
   $('project-name').textContent = name;
@@ -283,7 +337,11 @@ async function openProject(name) {
   showCounts();
   await watchProject(name).catch(error => console.error('Watching the project failed', error));
   const last = state.settings.main && `${projectFolder(name)}/.tex-build/${state.settings.main.replace(/^.*\//, '').replace(/\.[^.]+$/, '')}.pdf`;
-  if (last && await store.exists(last)) await pdf.show(await store.readBinary(last));
+  if (last && await store.exists(last)) {
+    await pdf.show(await store.readBinary(last));
+    const sync = last.replace(/\.pdf$/, '.synctex.gz');
+    if (await store.exists(sync)) { state.sync = await readSynctex(await store.readBinary(sync)).catch(() => null); state.builtRevision = state.revision; }
+  }
   say(canCompile() ? 'Ready.' : COMPILE_HINT());
 }
 
@@ -319,7 +377,7 @@ async function changeSettings(change) {
 
 async function newFile() {
   const path = cleanFilePath($('new-file-name').value);
-  if (state.files.includes(path)) throw new Error(`${path} already exists.`);
+  if (fileExists(path)) throw new Error(`${fileExists(path)} already exists.`);
   await writeFile(path, '');
   state.files = await listFiles(store, state.project);
   state.texts[path] = '';
@@ -340,12 +398,13 @@ async function deleteFile() {
 }
 
 async function renameFile(from, to) {
-  const path = cleanFilePath(to);
-  if (state.files.includes(path)) throw new Error(`${path} already exists.`);
+  const path = cleanFilePath(to), taken = fileExists(path);
+  if (taken && !sameName(taken, from)) throw new Error(`${taken} already exists.`);
   await saveNow();
-  await writeFile(path, await store.readBinary(fullPath(from)));
-  ownWrites.set(from, Date.now());
-  await store.remove(fullPath(from));
+  const bytes = await store.readBinary(fullPath(from));
+  // On a case-insensitive disk `a.tex` and `A.tex` are one file, so the old name goes first, with the bytes in hand.
+  if (sameName(path, from)) { await store.remove(fullPath(from)); await writeFile(path, bytes); }
+  else { await writeFile(path, bytes); await store.remove(fullPath(from)); }
   if (from in state.texts) { state.texts[path] = state.texts[from]; delete state.texts[from]; }
   state.files = await listFiles(store, state.project);
   if (state.settings.main === from) await changeSettings({ main:path });
@@ -357,10 +416,15 @@ async function renameFile(from, to) {
 async function addFiles(files, folder = '') {
   const added = [];
   for (const file of files) {
-    const path = cleanFilePath(folder + file.name.replace(/[\\/]/g, '-'));
-    await writeFile(path, new Uint8Array(await file.arrayBuffer()));
-    if (isText(path)) state.texts[path] = await file.text();
-    added.push(path);
+    const path = cleanFilePath(folder + file.name.replace(/[\\/]/g, '-')), taken = fileExists(path);
+    if (taken && !confirm(`Replace ${taken}?`)) continue;
+    const target = taken || path;
+    await writeFile(target, new Uint8Array(await file.arrayBuffer()));
+    if (isText(target)) {
+      state.texts[target] = await file.text();
+      if (target === state.path) { state.dirty = false; clearTimeout(saveTimer); editor.load(state.texts[target]); }
+    }
+    added.push(target);
   }
   state.files = await listFiles(store, state.project);
   renderTree();
@@ -369,6 +433,7 @@ async function addFiles(files, folder = '') {
 }
 
 async function dropFiles(files, at) {
+  if (!editingText()) throw new Error('Open a text file first.');
   const images = files.filter(file => isImage(file.name)), others = files.filter(file => !isImage(file.name));
   for (const path of await addFiles(images, 'figures/')) editor.insert(figureBlock({ path }), at);
   if (others.length) await addFiles(others);
@@ -476,6 +541,8 @@ function bindPage() {
   $('auto').addEventListener('change', event => { state.auto = event.target.checked; });
   $('engine').addEventListener('change', event => changeSettings({ engine:event.target.value }).catch(fail));
   $('main-file').addEventListener('change', event => changeSettings({ main:event.target.value }).catch(fail));
+  $('show-in-pdf').addEventListener('click', showInPdf);
+  $('pdf-find').addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); findInPdf(event.shiftKey ? -1 : 1).catch(fail); } });
   $('zoom-in').addEventListener('click', () => pdf.zoomBy(0.2));
   $('zoom-out').addEventListener('click', () => pdf.zoomBy(-0.2));
   $('add-file').addEventListener('click', () => { $('new-file-form').hidden = false; $('new-file-name').focus(); });
@@ -500,6 +567,7 @@ function bindPage() {
   $('insert').addEventListener('change', event => {
     const pick = event.target.value;
     event.target.value = '';
+    if (pick && !editingText()) { say('Open a text file first.', true); return; }
     if (pick === 'table') $('table-dialog').showModal();
     if (pick === 'symbol') { openPalette(); $('palette-dialog').showModal(); }
     if (pick === 'figure') $('figure-file').click();
@@ -542,6 +610,8 @@ const commands = {
   'search.find':({ query, regex, matchCase }) => findAll(state.texts, query, { regex, matchCase }),
   'search.todos':() => findTodos(state.texts),
   async 'search.replace'({ query, replacement, regex, matchCase }) { return { replaced:await replaceEverywhere(query, replacement, { regex, matchCase }) }; },
+  'pdf.locate':({ path, line }) => (syncReady() ? forward(state.sync, path, line) : null),
+  'pdf.source':({ page, x, y }) => (syncReady() ? inverse(state.sync, page, x, y) : null),
   'problems.list':() => state.problems.map(({ severity, file, line, headline, explanation, suggestion }) => ({ severity, file, line, headline, explanation, suggestion })),
 };
 

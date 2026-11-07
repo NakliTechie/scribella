@@ -54,7 +54,7 @@ const mathHover = hoverTooltip(async (view, pos) => {
   } };
 });
 
-export function createEditor(parent, { onChange, onSave, onDrop, project, path, keys = 'default' }) {
+export function createEditor(parent, { onChange, onSave, onDrop, onShow, project, path, keys = 'default' }) {
   let quiet = false;
   const keyMode = new Compartment();
   const keysFor = mode => (mode === 'vim' ? vim() : mode === 'emacs' ? emacs() : []);
@@ -68,7 +68,7 @@ export function createEditor(parent, { onChange, onSave, onDrop, project, path, 
         mathHover,
         StreamLanguage.define(stex),
         EditorView.lineWrapping,
-        keymap.of([indentWithTab, { key:'Mod-s', preventDefault:true, run:() => { onSave(); return true; } }]),
+        keymap.of([indentWithTab, { key:'Mod-s', preventDefault:true, run:() => { onSave(); return true; } }, { key:'Mod-Enter', preventDefault:true, run:() => { onShow(); return true; } }]),
         lintGutter(),
         linter(current => (/\.(tex|ltx)$/i.test(path()) ? lintSource(current.state.doc.toString(), project(), path()) : []), { delay:400 }),
         autocompletion({ override:[completions(project)] }),
@@ -86,6 +86,7 @@ export function createEditor(parent, { onChange, onSave, onDrop, project, path, 
   return {
     view,
     get text() { return view.state.doc.toString(); },
+    get currentLine() { return view.state.doc.lineAt(view.state.selection.main.head).number; },
     load(text) {
       quiet = true;
       view.dispatch({ changes:{ from:0, to:view.state.doc.length, insert:text }, selection:{ anchor:0 } });
