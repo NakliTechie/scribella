@@ -7,7 +7,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL('../vendor/pdfjs/pdf.worker.min.mj
 const WIDTH_MARGIN = 24;
 
 export function createPdfView(scroller, { onPages = () => {} } = {}) {
-  let doc = null, zoom = 1, generation = 0;
+  let doc = null, loading = null, zoom = 1, generation = 0;
   const shown = new Map(), queued = new Set();
 
   function anchor() {
@@ -71,19 +71,29 @@ export function createPdfView(scroller, { onPages = () => {} } = {}) {
     onPages(doc.numPages);
   }
 
+  let lastWidth = 0, resizing = 0;
+  new ResizeObserver(() => {
+    if (!doc || scroller.clientWidth === lastWidth) return;
+    lastWidth = scroller.clientWidth;
+    clearTimeout(resizing);
+    resizing = setTimeout(() => layout(anchor()), 200);
+  }).observe(scroller);
+
   return {
     async show(bytes) {
-      const next = await pdfjs.getDocument({ data:bytes }).promise;
-      const place = anchor(), old = doc;
+      const task = pdfjs.getDocument({ data:bytes });
+      const next = await task.promise;
+      const place = anchor(), old = loading;
       doc = next;
+      loading = task;
       await layout(place);
       old?.destroy();
     },
     clear() {
       generation += 1;
       watcher.disconnect();
-      doc?.destroy();
-      doc = null;
+      loading?.destroy();
+      doc = loading = null;
       scroller.replaceChildren();
     },
     zoomBy(step) {

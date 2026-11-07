@@ -17,6 +17,11 @@ test('an unknown command gets a one-click fix when it is a near typo', () => {
   assert.match(result.explanation, /uses 2 times/);
 });
 
+test('a suggestion is never the token itself, and a package command needs the paper to use it', () => {
+  assert.equal(closestCommand('\\section', '')?.name === '\\section', false);
+  assert.equal(closestCommand('\\cietp', '').name, '\\cite');
+});
+
 test('no suggestion when the token is not on the failing line, or nothing is close', () => {
   const log = '! Undefined control sequence.\nl.1 \\zzqqyy\n';
   const result = explain({ kind:'tex', line:1, message:'Undefined control sequence.' }, { log, source:'\\zzqqyy\n' });
@@ -33,7 +38,8 @@ test('known messages read plainly, unknown ones stay as TeX wrote them', () => {
 
 test('the closing lines and repeats of one error are hidden', () => {
   const error = { severity:'error', file:'a', line:1, message:'Bad' };
-  assert.equal(visibleDiagnostics([error, { ...error }, { ...error, message:'==> Fatal error occurred' }, { ...error, message:'Emergency stop.' }]).length, 1);
+  assert.equal(visibleDiagnostics([error, { ...error }, { ...error, message:'==> Fatal error occurred' }, { ...error, message:'Emergency stop.' }, { ...error, severity:'warning', message:'Shell escape feature is not enabled.' }]).length, 1);
+  assert.equal(visibleDiagnostics([{ severity:'warning', message:'W' }, error])[0], error);
 });
 
 test('the linter finds unclosed and mismatched environments', () => {

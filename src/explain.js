@@ -1,7 +1,8 @@
 // A failed build in plain words: TeX's message read against a fixed table of the mistakes papers make most, offline
 // and with no model. Messages the table does not know stay TeX's own. Derived from Lattice, see NOTICE.
 
-const VOCABULARY = ['\\begin', '\\end', '\\section', '\\subsection', '\\subsubsection', '\\paragraph', '\\chapter', '\\label', '\\ref', '\\eqref', '\\cite', '\\citep', '\\citet', '\\caption', '\\centering', '\\includegraphics', '\\usepackage', '\\documentclass', '\\title', '\\author', '\\date', '\\maketitle', '\\textbf', '\\textit', '\\emph', '\\texttt', '\\footnote', '\\item', '\\input', '\\include', '\\bibliography', '\\bibliographystyle', '\\newcommand', '\\renewcommand', '\\frac', '\\sqrt', '\\sum', '\\int', '\\alpha', '\\beta', '\\gamma', '\\delta', '\\lambda', '\\sigma', '\\mathbb', '\\mathbf', '\\mathcal', '\\mathrm', '\\left', '\\right', '\\hline', '\\toprule', '\\midrule', '\\bottomrule', '\\url', '\\href', '\\tableofcontents', '\\appendix'];
+// Only commands every LaTeX document has. A package's command is a good guess only if this paper already uses it.
+const VOCABULARY = ['\\begin', '\\end', '\\section', '\\subsection', '\\subsubsection', '\\paragraph', '\\label', '\\ref', '\\cite', '\\caption', '\\centering', '\\usepackage', '\\documentclass', '\\title', '\\author', '\\date', '\\maketitle', '\\textbf', '\\textit', '\\emph', '\\texttt', '\\footnote', '\\item', '\\input', '\\include', '\\bibliography', '\\bibliographystyle', '\\newcommand', '\\renewcommand', '\\frac', '\\sqrt', '\\sum', '\\int', '\\alpha', '\\beta', '\\gamma', '\\delta', '\\lambda', '\\sigma', '\\mathbf', '\\mathcal', '\\mathrm', '\\left', '\\right', '\\hline', '\\tableofcontents', '\\appendix'];
 
 // Edits between two command names, a swap of neighbours counting as one: \cietp is one edit from \citep.
 export function editDistance(left, right) {
@@ -27,6 +28,7 @@ export function closestCommand(token, source) {
   if (budget < 1) return null;
   let best = null, tied = false;
   for (const name of new Set([...uses.keys(), ...VOCABULARY])) {
+    if (name === token) continue;
     const edits = editDistance(token, name);
     if (edits > budget) continue;
     const rank = edits - Math.min(0.9, 0.5 + (uses.get(name) ?? -10) / 40);
@@ -80,14 +82,17 @@ export function explain(diagnostic, { log = '', source = '' } = {}) {
   return { headline:diagnostic.message, explanation:'' };
 }
 
-// Repeats and the lines TeX prints while giving up add nothing to the first error.
+const NOISE = /^(==>|Emergency stop\.|Shell escape feature is not enabled)/;
+
+// Repeats, the lines TeX prints while giving up, and notes about the engine's fixed setup add nothing. Errors come first.
 export function visibleDiagnostics(diagnostics) {
   const seen = new Set();
-  return diagnostics.filter(item => {
-    if (item.message.startsWith('==>') || item.message === 'Emergency stop.') return false;
+  const kept = diagnostics.filter(item => {
+    if (NOISE.test(item.message)) return false;
     const key = `${item.severity}|${item.file}|${item.line}|${item.message}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
+  return [...kept.filter(item => item.severity === 'error'), ...kept.filter(item => item.severity !== 'error')];
 }

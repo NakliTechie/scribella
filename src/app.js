@@ -13,9 +13,12 @@ const AUTOSAVE_MS = 1200;
 const $ = id => document.getElementById(id);
 const naklios = window.naklios;
 const hosted = () => !!(naklios?.capabilities?.hosted && naklios.capabilities.fs);
-const canCompile = () => hosted() && naklios.capabilities.experimental_tex === true;
+const canCompile = () => storeKind === 'host' && naklios.capabilities.experimental_tex === true;
+const COMPILE_HINT = () => (naklios?.capabilities?.hosted
+  ? 'Writing works here. To compile, connect a Folder or Crate in NakliOS Settings.'
+  : 'Writing works here. To compile, open Paginella inside NakliOS, where the TeX engine runs.');
 
-let store = null;
+let store = null, storeKind = null;
 const state = { project:null, settings:{}, files:[], texts:{}, path:null, dirty:false, revision:0, problems:[], log:'', job:null, auto:true };
 let saveTimer = null;
 
@@ -193,7 +196,7 @@ const builder = createBuilder({
 
 function build() {
   if (!state.project || !state.settings.main) return;
-  if (!canCompile()) { say('Writing works here. To compile, open Paginella inside NakliOS, where the TeX engine runs.'); return; }
+  if (!canCompile()) { say(COMPILE_HINT()); return; }
   builder.request(state.revision);
 }
 
@@ -231,7 +234,7 @@ async function openProject(name) {
   showCounts();
   const last = state.settings.main && `${projectFolder(name)}/.tex-build/${state.settings.main.replace(/^.*\//, '').replace(/\.[^.]+$/, '')}.pdf`;
   if (last && await store.exists(last)) await pdf.show(await store.readBinary(last));
-  say(canCompile() ? 'Ready.' : 'Writing works here. To compile, open Paginella inside NakliOS, where the TeX engine runs.');
+  say(canCompile() ? 'Ready.' : COMPILE_HINT());
 }
 
 async function renderHome() {
@@ -249,6 +252,7 @@ async function renderHome() {
     return row;
   }));
   $('no-projects').hidden = names.length > 0;
+  $('where').textContent = storeKind === 'host' ? 'Projects live in your NakliOS storage.' : 'Projects live in this browser only.';
 }
 
 function fail(error) {
@@ -293,7 +297,7 @@ function bindPage() {
     event.preventDefault();
     createProject(store, $('project-title').value, $('template').value).then(openProject).catch(fail);
   });
-  $('home').addEventListener('click', () => saveNow().then(renderHome).catch(fail));
+  $('home').addEventListener('click', () => saveNow().then(() => { state.project = null; state.path = null; return chooseStore(); }).then(renderHome).catch(fail));
   $('build').addEventListener('click', () => saveNow().then(build).catch(fail));
   $('cancel').addEventListener('click', () => { if (state.job) naklios.experimental_tex.cancel(state.job.id); });
   $('auto').addEventListener('change', event => { state.auto = event.target.checked; });
@@ -337,13 +341,23 @@ async function registerCommands() {
   naklios?.experimental_commands?.register?.(manifest.commands.map(command => ({ ...command, name:`paginella.${command.name}`, handler:commands[command.name] })));
 }
 
+// TeX reads NakliOS storage, so a project must live there to compile. The host's capabilities can arrive after the page
+// starts, so the choice is made again whenever they change, while no project is open.
+async function chooseStore() {
+  const kind = hosted() ? 'host' : 'browser';
+  if (kind === storeKind || state.project) return;
+  storeKind = kind;
+  store = kind === 'host' ? hostStore(naklios.fs) : browserStore();
+  await renderHome();
+}
+
 async function start() {
   bindPage();
-  store = hosted() ? hostStore(naklios.fs) : browserStore();
   window.paginella = { commands, state };
   naklios?.ready?.();
+  await chooseStore();
+  naklios?.onCapabilitiesChange?.(() => { chooseStore().catch(fail); });
   await registerCommands().catch(error => console.error('Commands failed to register', error));
-  await renderHome();
 }
 
 // Inside NakliOS the capabilities arrive after load, so the first read waits for them briefly.
