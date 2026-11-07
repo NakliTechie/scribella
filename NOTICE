@@ -1,7 +1,7 @@
 Scribella
 Copyright 2026 Chirag Patnaik. MIT licence, see LICENSE.
 
-src/explain.js and the rules in src/lint.js are derived from Lattice
+src/explain.js, src/protected.js and the rules in src/lint.js, src/annotations.js and src/revise.js are derived from Lattice
 (https://github.com/leo1oel/lattice, commit 325406c),
 Copyright 2026 Leonardo and the Lattice contributors, under the Apache License 2.0.
 The licence text is in vendor/LICENSE-lattice. templates/ holds venue and thesis templates copied from Lattice with their UPSTREAM.md records;

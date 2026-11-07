@@ -279,6 +279,66 @@
         "type": "object",
         "properties": {}
       }
+    },
+    {
+      "name": "notes.list",
+      "description": "List the notes and highlights in the open Scribella project.",
+      "scope": "read",
+      "input": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "notes.add",
+      "description": "Add a note on a quoted passage of a Scribella file.",
+      "scope": "write",
+      "input": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "quote": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "intent": {
+            "type": "string",
+            "enum": [
+              "",
+              "rewrite",
+              "shorten",
+              "clarify",
+              "cite",
+              "fix"
+            ]
+          }
+        },
+        "required": [
+          "file",
+          "quote",
+          "body"
+        ]
+      }
+    },
+    {
+      "name": "notes.resolve",
+      "description": "Mark a Scribella note resolved.",
+      "scope": "write",
+      "input": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
     }
   ],
   "parity": {
@@ -317,6 +377,22 @@
     "save-version": "versions.save",
     "version-changes": "versions.changes",
     "version-restore": "person: restoring replaces the person's text, so it stays their choice",
-    "arxiv": "arxiv.pack"
+    "arxiv": "arxiv.pack",
+    "proposal-accept": "person: accepting or rejecting an edit is the person's own decision",
+    "proposal-reject": "person: accepting or rejecting an edit is the person's own decision",
+    "proposal-again": "person: accepting or rejecting an edit is the person's own decision",
+    "annotate": "notes.add",
+    "note-save": "notes.add",
+    "highlight": "notes.add",
+    "note-go": "view",
+    "note-revise": "person: a revision waits on the person's decision",
+    "note-resolve": "notes.resolve",
+    "note-delete": "person: deleting a note is the person's own choice",
+    "proofread": "person: a revision waits on the person's decision",
+    "polish": "person: a revision waits on the person's decision",
+    "rewrite": "person: a revision waits on the person's decision",
+    "revise-all": "person: a round waits on the person's decisions",
+    "tab-problems": "view",
+    "tab-notes": "view"
   }
 }

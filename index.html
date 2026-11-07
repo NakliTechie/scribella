@@ -28,8 +28,12 @@ main{display:grid;grid-template-columns:210px minmax(0,1fr) minmax(0,1fr);min-he
 .rail-actions{flex-wrap:wrap}#search-box{padding:0 8px;display:grid;gap:4px}#search-box input[type=search],#search-box input[type=text]{width:100%}#search-box label{font-size:12px;color:var(--soft);display:inline-flex;gap:3px;align-items:center;margin-right:8px}#search-count{font-size:12px;color:var(--soft)}#search-results .row{font-size:12px}
 dialog{border:1px solid var(--line);border-radius:8px;padding:16px;width:min(560px,92vw);color:var(--ink)}dialog::backdrop{background:#0004}dialog h1{font-size:16px}dialog textarea{width:100%;height:180px;font:12px ui-monospace,monospace;border:1px solid var(--line);border-radius:5px;padding:6px}dialog .end{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}#symbols{max-height:50vh;overflow:auto;display:flex;flex-wrap:wrap;gap:4px}#symbols h2{width:100%;margin:8px 0 2px}.math-tip{padding:6px 10px;font-size:15px;background:#fff}
 .version{padding:3px 8px;font-size:12px;display:flex;flex-wrap:wrap;gap:4px;align-items:center}.version span{width:100%;color:var(--soft)}
+.tabs{position:sticky;top:0;background:var(--bg);display:flex;gap:4px;align-items:center;padding:4px 8px;border-bottom:1px solid var(--line);z-index:1}.tab{border:0;background:none;padding:2px 8px;border-radius:4px;cursor:pointer;font-size:13px}.tab[aria-pressed=true]{background:var(--sel);font-weight:600}
+#sel-bar{padding:4px 10px;border-bottom:1px solid var(--line);display:flex;gap:6px;align-items:center;background:var(--bg)}#sel-bar select{font-size:12px;padding:2px}
+#proposal{padding:8px 10px;border-bottom:2px solid var(--brand);background:#fff}#proposal-edits li{padding:2px 0;font-size:13px;border:0}del{color:var(--bad)}ins{color:var(--brand);text-decoration:underline}.note{padding:2px 10px 8px;border-bottom:1px solid var(--line)}.note.resolved{opacity:.6}.note.rejected strong{color:var(--warn)}
+.note-note{background:#f2c94c44}.note-check{background:#fff3a8}.note-keep{background:#c8efc8}.note-cite{background:#c8dfff}.note-rewrite{background:#ffd0e0}.note-question{background:#ffe0b8}.note-idea{background:#e4d4ff}
 #new-file-form{padding:6px 8px}#new-file-form input{width:100%}
-#centre{display:grid;grid-template-rows:auto minmax(0,1fr) minmax(90px,32%);min-width:0;border-right:1px solid var(--line)}
+#centre{display:grid;grid-template-rows:auto auto minmax(0,1fr) minmax(90px,32%);min-width:0;border-right:1px solid var(--line)}
 #file-name{padding:4px 10px;border-bottom:1px solid var(--line);color:var(--soft);font-size:13px}
 #editor{min-height:0;overflow:hidden;background:#fff}#editor .cm-editor{height:100%}#editor .cm-scroller{font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
 #not-text{padding:24px;color:var(--soft)}
@@ -102,9 +106,25 @@ body[data-building] #status::before{content:"● ";color:var(--brand)}
     </nav>
     <section id="centre" aria-label="Source">
       <div id="file-name"></div>
+      <div id="sel-bar" hidden>
+        <button id="annotate" class="btn small" data-command="annotate">Annotate</button>
+        <select id="highlight" data-command="highlight" aria-label="Highlight"><option value="">Highlight…</option></select>
+        <span id="ai-tools" hidden><button id="proofread" class="btn small" data-command="proofread">Proofread</button> <button id="polish" class="btn small" data-command="polish">Polish</button> <button id="rewrite" class="btn small" data-command="rewrite">Rewrite…</button></span>
+      </div>
       <div id="editor"></div>
       <div id="not-text" hidden>This file is not text, so it opens only in the build.</div>
-      <div id="problems-pane"><h2 id="problem-count">No problems</h2><ul id="problems"></ul></div>
+      <div id="problems-pane">
+        <div class="tabs"><button id="tab-problems" class="tab" aria-pressed="true" data-command="tab-problems"><span id="problem-count">No problems</span></button><button id="tab-notes" class="tab" aria-pressed="false" data-command="tab-notes"><span id="notes-tab">Notes (0)</span></button><button id="revise-all" class="btn small" data-command="revise-all" hidden>Revise all notes</button></div>
+        <div id="problems-list"><ul id="problems"></ul></div>
+        <div id="notes-list" hidden>
+          <div id="proposal" hidden>
+            <strong id="proposal-reason"></strong>
+            <ul id="proposal-edits"></ul>
+            <button id="proposal-accept" class="btn small primary" data-command="proposal-accept">Accept</button> <button id="proposal-reject" class="btn small" data-command="proposal-reject">Reject</button> <button id="proposal-again" class="btn small" data-command="proposal-again">Try again</button>
+          </div>
+          <ul id="notes"></ul>
+        </div>
+      </div>
     </section>
     <section id="pdf-side" aria-label="PDF">
       <div id="pdf-bar"><span id="pages"></span><span id="pdf-hits"></span><input id="pdf-find" type="search" placeholder="Find in PDF" aria-label="Find in PDF" data-command="pdf-find" style="width:130px"><button id="show-in-pdf" class="btn small" data-command="show-in-pdf" title="Ctrl or Cmd + Enter. Double-click the PDF to jump back.">Show in PDF</button><button id="zoom-out" class="btn small" data-command="zoom-out" aria-label="Zoom out">−</button><button id="zoom-in" class="btn small" data-command="zoom-in" aria-label="Zoom in">+</button></div>
@@ -119,6 +139,12 @@ body[data-building] #status::before{content:"● ";color:var(--brand)}
   <textarea id="table-data" aria-label="Table data" placeholder="Paste CSV or tab-separated rows. The first row is the header."></textarea>
   <input id="table-caption" aria-label="Caption" placeholder="Caption" style="width:100%;margin-top:6px">
   <div class="end"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary" data-command="insert-table">Insert</button></div>
+</form></dialog>
+<dialog id="note-dialog"><form id="note-form">
+  <h1>Add a note</h1>
+  <textarea id="note-body" aria-label="Note" style="height:90px" required></textarea>
+  <select id="note-intent" aria-label="Intent" style="margin-top:6px"></select>
+  <div class="end"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary" data-command="note-save">Save</button></div>
 </form></dialog>
 <dialog id="palette-dialog">
   <h1>Symbols</h1>

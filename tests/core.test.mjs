@@ -13,6 +13,9 @@ import { diffLists, markChanges } from '../src/changes.js';
 import { stripComments, usedFiles } from '../src/arxiv.js';
 import { listVersions, readVersion, saveVersion } from '../src/versions.js';
 import { readFileSync } from 'node:fs';
+import { keepsProtected, protectedSpans } from '../src/protected.js';
+import { locate, makeAnchor, parseNotes } from '../src/annotations.js';
+import { applyEdits, buildMessages, parseReply, safeResult, wordEdits } from '../src/revise.js';
 import { cleanFilePath, loadVenues, createProject, findMain, listFiles, listProjects, readSettings } from '../src/project.js';
 
 test('an unknown command gets a one-click fix when it is a near typo', () => {
@@ -287,4 +290,46 @@ test('SyncTeX: a figure box cannot throw the view off the page, and generated fi
   const box = forward(sync, 'main.tex', 8);
   assert.ok(box.y >= 0 && box.height <= 60);
   assert.deepEqual(inverse(sync, 1, 110, 100, new Set(['main.tex'])), { file:'main.tex', line:8 });
+});
+
+test('protected spans cover math, references, comments and commands, and spare prose', () => {
+  const text = 'Prose $x+1$ more \\cite{a} and \\emph{word} % note\nend';
+  const covered = protectedSpans(text).map(span => text.slice(span.from, span.to));
+  assert.ok(covered.includes('$x+1$') && covered.includes('\\cite{a}') && covered.includes('% note'));
+  assert.ok(!covered.some(piece => piece.includes('Prose') || piece.includes('word')));
+  assert.equal(keepsProtected('a $x$ b', 'c $x$ d'), true);
+  assert.equal(keepsProtected('a $x$ b', 'a $y$ b'), false);
+  assert.equal(keepsProtected('a \\cite{k} b', 'a b'), false);
+});
+
+test('anchors survive edits elsewhere and refuse to guess', () => {
+  const text = 'one two three two four';
+  const anchor = makeAnchor(text, 8, 13);
+  assert.deepEqual(locate(text, anchor), { from:8, to:13 });
+  assert.deepEqual(locate(`zero ${text}`, anchor), { from:13, to:18 });
+  assert.equal(locate('nothing here', anchor), null);
+  const twice = makeAnchor(text, 4, 7);
+  assert.deepEqual(locate(`xx${text}`, twice), { from:6, to:9 }, 'the context picks the right copy');
+  assert.equal(locate('two and two', twice), null, 'two copies with no context fail');
+  assert.deepEqual(parseNotes('bad'), { notes:[], rounds:0 });
+});
+
+test('replies parse, and a bad format is an error', () => {
+  assert.deepEqual(parseReply('<revision>New text.</revision><reason>Clearer.</reason>'), { revision:'New text.', reason:'Clearer.' });
+  assert.deepEqual(parseReply('<question>Which one?</question>'), { question:'Which one?' });
+  assert.throws(() => parseReply('Sure, here you go'), /expected format/);
+  const [system, user] = buildMessages({ task:'proofread', passage:'p', before:'b', note:'n', intent:'cite', keys:['k1'] });
+  assert.match(system.content, /<revision>/);
+  assert.match(user.content, /<bibliography>k1/);
+});
+
+test('edits are phrase sized, apply in any subset, and hold protected text', () => {
+  const before = 'The quick brown fox $x$ jumps.', after = 'The slow red fox $y$ jumps high.';
+  const edits = wordEdits(before, after);
+  assert.equal(applyEdits(before, edits), after);
+  assert.deepEqual(edits.map(edit => [edit.original, edit.insert, edit.held]), [['quick brown', 'slow red', false], ['$x$', '$y$', true], ['jumps.', 'jumps high.', false]]);
+  const chosen = edits.filter(edit => !edit.held);
+  assert.equal(safeResult(before, chosen), 'The slow red fox $x$ jumps high.');
+  assert.throws(() => safeResult(before, edits), /not applied/);
+  assert.equal(safeResult(before, edits, { allowProtected:true }), after);
 });

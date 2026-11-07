@@ -15,6 +15,8 @@ import { forward, inverse, readSynctex } from './synctex.js';
 import { listVersions, readVersion, saveVersion } from './versions.js';
 import { markChanges } from './changes.js';
 import { stripComments, usedFiles } from './arxiv.js';
+import { HIGHLIGHTS, INTENTS, NOTES_PATH, locate, makeAnchor, parseNotes } from './annotations.js';
+import { MAX_PASSAGE, buildMessages, parseReply, safeResult, wordEdits } from './revise.js';
 
 const AUTOSAVE_MS = 1200;
 const OUTSIDE_EDIT_MS = 1500;
@@ -29,7 +31,9 @@ const COMPILE_HINT = () => (naklios?.capabilities?.hosted
 
 let store = null, storeKind = null;
 const state = { sync:null, builtRevision:null, findHits:[], findIndex:-1, project:null, settings:{}, files:[], texts:{}, path:null, dirty:false, revision:0, problems:[], log:'', job:null, auto:true };
-let venues = {};
+let venues = {}, marksTimer = null;
+const review = { notes:[], rounds:0, proposal:null };
+const aiReady = () => naklios?.capabilities?.ai === true;
 const SCRATCH = 'scratch-build';
 let saveTimer = null, outsideTimer = null, stopWatching = null;
 const readKeys = () => { try { return localStorage.getItem(KEYS_ITEM) || 'default'; } catch (_) { return 'default'; } };
@@ -58,6 +62,7 @@ const editor = createEditor($('editor'), {
   project:projectIndex,
   keys:readKeys(),
   onShow:() => showInPdf(),
+  onSelect:selected => { $('sel-bar').hidden = !selected || !editingText(); $('ai-tools').hidden = !aiReady(); },
   onDrop:(files, at) => dropFiles(files, at).catch(fail),
   onSave:() => saveNow().then(() => state.project && build()),
   onChange() {
@@ -66,6 +71,8 @@ const editor = createEditor($('editor'), {
     state.texts[state.path] = editor.text;
     state.revision += 1;
     showCounts();
+    clearTimeout(marksTimer);
+    marksTimer = setTimeout(showNoteMarks, 500);
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => saveNow().then(() => { if (state.auto) build(); }), AUTOSAVE_MS);
   },
@@ -289,6 +296,7 @@ async function openFile(path) {
   if (text) {
     state.texts[path] ??= await store.read(fullPath(path));
     editor.load(state.texts[path]);
+    showNoteMarks();
   }
   renderTree();
 }
@@ -350,6 +358,10 @@ async function openProject(name) {
   await openFile(state.settings.main || state.files[0]);
   showCounts();
   await renderVersions();
+  Object.assign(review, { notes:[], rounds:0, proposal:null });
+  if (await store.exists(notesFile())) Object.assign(review, parseNotes(await store.read(notesFile())));
+  renderProposal();
+  renderNotes();
   await watchProject(name).catch(error => console.error('Watching the project failed', error));
   const last = state.settings.main && `${projectFolder(name)}/.tex-build/${state.settings.main.replace(/^.*\//, '').replace(/\.[^.]+$/, '')}.pdf`;
   if (last && await store.exists(last)) {
@@ -552,6 +564,176 @@ async function insertTable() {
 
 const projectRoot = () => projectFolder(state.project);
 
+const notesFile = () => `${projectRoot()}/${NOTES_PATH}`;
+const saveNotes = () => store.write(notesFile(), JSON.stringify({ notes:review.notes, rounds:review.rounds }, null, 1));
+const whereIs = note => (state.texts[note.file] == null ? null : locate(state.texts[note.file], note.anchor));
+
+function showNoteMarks() {
+  if (!editingText()) return;
+  editor.showMarks(review.notes.filter(note => note.file === state.path && note.status !== 'resolved').flatMap(note => {
+    const place = whereIs(note);
+    return place ? [{ ...place, color:note.color || 'note' }] : [];
+  }));
+}
+
+function renderNotes() {
+  const open = review.notes.filter(note => note.status !== 'resolved');
+  $('notes-tab').textContent = `Notes (${open.length})`;
+  $('revise-all').hidden = !aiReady() || !open.some(note => note.body);
+  $('notes').replaceChildren(...review.notes.map(note => {
+    const row = document.createElement('li');
+    row.className = `note ${note.status}`;
+    const go = document.createElement('button');
+    go.type = 'button'; go.className = 'problem'; go.dataset.command = 'note-go';
+    const place = whereIs(note);
+    const quote = document.createElement('span');
+    quote.className = 'place';
+    quote.textContent = `${note.file}: ${note.anchor.quote.slice(0, 70)}${place ? '' : ' (text no longer found)'}`;
+    const body = document.createElement('strong');
+    body.textContent = note.body || HIGHLIGHTS.find(([id]) => id === note.color)?.[1] || 'Note';
+    go.append(body, quote);
+    go.addEventListener('click', () => goToNote(note).catch(fail));
+    row.append(go);
+    const action = (label, command, run) => {
+      const button = document.createElement('button');
+      button.type = 'button'; button.className = 'btn small'; button.dataset.command = command; button.textContent = label;
+      button.addEventListener('click', () => Promise.resolve().then(run).catch(fail));
+      row.append(button);
+    };
+    if (aiReady() && note.body && place && note.status !== 'resolved') action('Revise', 'note-revise', () => reviseNote(note));
+    action(note.status === 'resolved' ? 'Reopen' : 'Resolve', 'note-resolve', () => setNoteStatus(note, note.status === 'resolved' ? 'open' : 'resolved'));
+    action('Delete', 'note-delete', () => deleteNote(note));
+    return row;
+  }));
+  showNoteMarks();
+}
+
+async function goToNote(note) {
+  if (note.file !== state.path) await openFile(note.file);
+  const place = whereIs(note);
+  if (place) editor.select(place.from, place.to);
+}
+
+async function addNote({ body = '', intent = '', color = 'note', file = state.path, from, to }) {
+  if (from == null) ({ from, to } = editor.selection);
+  if (from === to) throw new Error('Select some text first.');
+  const note = { id:`n${Date.now()}${Math.floor(Math.random() * 1000)}`, file, anchor:makeAnchor(state.texts[file], from, to), body, intent, color, status:'open' };
+  review.notes.unshift(note);
+  await saveNotes();
+  renderNotes();
+  return note;
+}
+
+async function setNoteStatus(note, status) { note.status = status; await saveNotes(); renderNotes(); }
+async function deleteNote(note) { review.notes = review.notes.filter(item => item !== note); await saveNotes(); renderNotes(); }
+
+async function askModel(messages) {
+  const reply = await naklios.ai.chat.completions.create({ messages, max_tokens:4096, stream:false, onStatus:status => say(`The model is ${status}…`) });
+  return parseReply(reply.choices?.[0]?.message?.content || '');
+}
+
+function renderProposal() {
+  const proposal = review.proposal;
+  $('proposal').hidden = !proposal;
+  if (!proposal) return;
+  $('proposal-reason').textContent = proposal.question ? `The model asks: ${proposal.question}` : proposal.reason || 'Proposed edits';
+  $('proposal-accept').hidden = !!proposal.question;
+  $('proposal-edits').replaceChildren(...(proposal.edits || []).map((edit, index) => {
+    const row = document.createElement('li');
+    const box = document.createElement('input');
+    box.type = 'checkbox'; box.checked = !edit.held; box.disabled = edit.held; box.dataset.index = index;
+    box.setAttribute('aria-label', 'Apply this edit');
+    const words = document.createElement('span');
+    const gone = document.createElement('del'); gone.textContent = edit.original;
+    const come = document.createElement('ins'); come.textContent = edit.insert;
+    words.append(gone, ' ', come);
+    if (edit.held) words.append(' (held: touches math, a citation or a command)');
+    row.append(box, ' ', words);
+    return row;
+  }));
+  if (proposal.edits && !proposal.edits.length) $('proposal-reason').textContent = 'The model suggests no changes here.';
+  $('tab-notes').click();
+}
+
+// Answers when the person has decided, so a round can wait for each proposal in turn.
+async function propose({ file, from, to, task = '', note = null, instruction = '', rejected = '', guidance = '' }) {
+  const text = state.texts[file], passage = text.slice(from, to);
+  if (passage.length > MAX_PASSAGE) throw new Error('This passage is too long. Select less text.');
+  const keys = [...projectIndex().bibKeys];
+  const messages = buildMessages({ task, passage, before:text.slice(Math.max(0, from - 1200), from), after:text.slice(to, to + 1200), note:note?.body, intent:note?.intent, instruction, rejected, guidance, keys });
+  say('Asking the model…');
+  const reply = await askModel(messages);
+  say('Ready.');
+  const allowProtected = note?.intent === 'cite';
+  review.proposal = { file, from, to, passage, task, note, instruction, allowProtected, ...reply, edits:reply.revision === undefined ? null : wordEdits(passage, reply.revision, { allowProtected }) };
+  renderProposal();
+  return new Promise(resolve => { review.proposal.done = resolve; });
+}
+
+function chosenEdits() {
+  return [...$('proposal-edits').querySelectorAll('input:checked')].map(box => review.proposal.edits[Number(box.dataset.index)]);
+}
+
+async function acceptProposal() {
+  const proposal = review.proposal, { file, from, to, passage } = proposal;
+  if (state.path !== file) await openFile(file);
+  if (editor.slice(from, to) !== passage) throw new Error('This text changed while the proposal waited, so nothing was applied. Try again.');
+  const next = safeResult(passage, chosenEdits(), { allowProtected:proposal.allowProtected });
+  editor.replaceRange(from, to, next);
+  if (proposal.note) {
+    proposal.note.anchor = makeAnchor(editor.text, from, from + next.length);
+    await setNoteStatus(proposal.note, 'resolved');
+  }
+  finishProposal('accepted');
+}
+
+function finishProposal(outcome) {
+  const done = review.proposal?.done;
+  review.proposal = null;
+  renderProposal();
+  done?.(outcome);
+}
+
+async function rejectProposal() {
+  if (review.proposal?.note) await setNoteStatus(review.proposal.note, 'rejected');
+  finishProposal('rejected');
+}
+
+async function tryAgain() {
+  const { file, from, to, task, note, instruction, revision, done } = review.proposal;
+  const guidance = prompt('What should change? This is optional.', '') ?? '';
+  review.proposal = null;
+  renderProposal();
+  done?.(await propose({ file, from, to, task, note, instruction, rejected:revision || '', guidance }));
+}
+
+async function reviseSelection(task, instruction = '') {
+  const { from, to } = editor.selection;
+  if (from === to) throw new Error('Select some text first.');
+  await saveNow();
+  return propose({ file:state.path, from, to, task, instruction });
+}
+
+async function reviseNote(note) {
+  const place = whereIs(note);
+  if (!place) throw new Error('This note lost its text.');
+  if (note.file !== state.path) await openFile(note.file);
+  return propose({ file:note.file, ...place, note });
+}
+
+// One proposal at a time; when the last settles, the round is saved as a version.
+async function reviseRound() {
+  await saveNow();
+  review.rounds += 1;
+  const number = review.rounds, open = review.notes.filter(note => note.status === 'open' && note.body && whereIs(note));
+  const outcomes = [];
+  for (const note of open) outcomes.push(await reviseNote(note));
+  await saveNotes();
+  await saveNow();
+  await keepVersion(`Round ${number}`);
+  return outcomes;
+}
+
 async function renderVersions() {
   const versions = await listVersions(store, projectRoot());
   $('versions').replaceChildren(...versions.map(version => {
@@ -653,6 +835,26 @@ function bindPage() {
   $('auto').addEventListener('change', event => { state.auto = event.target.checked; });
   $('engine').addEventListener('change', event => changeSettings({ engine:event.target.value }).catch(fail));
   $('main-file').addEventListener('change', event => changeSettings({ main:event.target.value }).catch(fail));
+  for (const [id, label] of HIGHLIGHTS) $('highlight').append(new Option(label, id));
+  for (const [id, label] of INTENTS) $('note-intent').append(new Option(label, id));
+  $('annotate').addEventListener('click', () => { review.selection = editor.selection; $('note-dialog').showModal(); $('note-body').focus(); });
+  $('note-form').addEventListener('submit', event => {
+    event.preventDefault();
+    const { from, to } = review.selection;
+    addNote({ body:$('note-body').value.trim(), intent:$('note-intent').value, from, to }).then(() => { $('note-body').value = ''; $('note-dialog').close(); $('tab-notes').click(); }).catch(fail);
+  });
+  $('highlight').addEventListener('change', event => { const color = event.target.value; event.target.value = ''; if (color) addNote({ color }).catch(fail); });
+  $('proofread').addEventListener('click', () => reviseSelection('proofread').catch(fail));
+  $('polish').addEventListener('click', () => reviseSelection('polish').catch(fail));
+  $('rewrite').addEventListener('click', () => { const instruction = prompt('What should change?'); if (instruction) reviseSelection('', instruction).catch(fail); });
+  $('proposal-accept').addEventListener('click', () => acceptProposal().catch(fail));
+  $('proposal-reject').addEventListener('click', () => rejectProposal().catch(fail));
+  $('proposal-again').addEventListener('click', () => tryAgain().catch(fail));
+  $('revise-all').addEventListener('click', () => reviseRound().catch(fail));
+  for (const [tab, pane] of [['tab-problems', 'problems-list'], ['tab-notes', 'notes-list']]) $(tab).addEventListener('click', () => {
+    for (const other of ['problems-list', 'notes-list']) $(other).hidden = other !== pane;
+    for (const other of ['tab-problems', 'tab-notes']) $(other).setAttribute('aria-pressed', String(other === tab));
+  });
   $('show-in-pdf').addEventListener('click', showInPdf);
   $('pdf-find').addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); findInPdf(event.shiftKey ? -1 : 1).catch(fail); } });
   $('zoom-in').addEventListener('click', () => pdf.zoomBy(0.2));
@@ -731,6 +933,13 @@ const commands = {
   'versions.save':({ label }) => keepVersion(label),
   async 'versions.changes'({ id }) { const version = (await listVersions(store, projectRoot())).find(item => item.id === id); return changesPdf(version); },
   'arxiv.pack':() => arxivPack(),
+  'notes.list':() => review.notes.map(({ id, file, body, intent, color, status, anchor }) => ({ id, file, body, intent, color, status, quote:anchor.quote })),
+  async 'notes.add'({ file, quote, body, intent }) {
+    const at = state.texts[file]?.indexOf(quote) ?? -1;
+    if (at < 0) throw new Error('That text is not in the file.');
+    return { id:(await addNote({ file, from:at, to:at + quote.length, body, intent })).id };
+  },
+  async 'notes.resolve'({ id }) { const note = review.notes.find(item => item.id === id); if (!note) throw new Error('No such note.'); await setNoteStatus(note, 'resolved'); return { resolved:id }; },
   'problems.list':() => state.problems.map(({ severity, file, line, headline, explanation, suggestion }) => ({ severity, file, line, headline, explanation, suggestion })),
 };
 
@@ -751,7 +960,7 @@ async function chooseStore() {
 
 async function start() {
   bindPage();
-  window.scribella = { commands, state };
+  window.scribella = { commands, state, editor };
   naklios?.ready?.();
   await chooseStore();
   naklios?.onCapabilitiesChange?.(() => { chooseStore().catch(fail); });

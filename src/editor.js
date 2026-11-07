@@ -1,5 +1,5 @@
 // The source editor: CodeMirror with LaTeX highlighting, the linter and project-aware completion.
-import { Compartment, EditorView, EditorState, StreamLanguage, autocompletion, basicSetup, emacs, hoverTooltip, indentWithTab, keymap, lintGutter, linter, stex, vim } from '../vendor/codemirror.mjs';
+import { Compartment, Decoration, EditorView, EditorState, StateEffect, StateField, StreamLanguage, autocompletion, basicSetup, emacs, hoverTooltip, indentWithTab, keymap, lintGutter, linter, stex, vim } from '../vendor/codemirror.mjs';
 import { lintSource } from './lint.js';
 
 const COMMANDS = ['section', 'subsection', 'subsubsection', 'paragraph', 'label', 'ref', 'eqref', 'cite', 'citep', 'citet', 'caption', 'centering', 'includegraphics', 'usepackage', 'textbf', 'textit', 'emph', 'texttt', 'footnote', 'item', 'input', 'include', 'bibliography', 'bibliographystyle', 'newcommand', 'renewcommand', 'frac', 'sqrt', 'sum', 'int', 'mathbb', 'mathbf', 'mathcal', 'mathrm', 'left', 'right', 'url', 'href', 'maketitle', 'tableofcontents', 'appendix'];
@@ -54,7 +54,18 @@ const mathHover = hoverTooltip(async (view, pos) => {
   } };
 });
 
-export function createEditor(parent, { onChange, onSave, onDrop, onShow, project, path, keys = 'default' }) {
+const setMarks = StateEffect.define();
+const marks = StateField.define({
+  create:() => Decoration.none,
+  update(value, transaction) {
+    let next = value.map(transaction.changes);
+    for (const effect of transaction.effects) if (effect.is(setMarks)) next = effect.value;
+    return next;
+  },
+  provide:field => EditorView.decorations.from(field),
+});
+
+export function createEditor(parent, { onChange, onSave, onDrop, onShow, onSelect = () => {}, project, path, keys = 'default' }) {
   let quiet = false;
   const keyMode = new Compartment();
   const keysFor = mode => (mode === 'vim' ? vim() : mode === 'emacs' ? emacs() : []);
@@ -66,6 +77,7 @@ export function createEditor(parent, { onChange, onSave, onDrop, onShow, project
         keyMode.of(keysFor(keys)),
         basicSetup,
         mathHover,
+        marks,
         StreamLanguage.define(stex),
         EditorView.lineWrapping,
         keymap.of([indentWithTab, { key:'Mod-s', preventDefault:true, run:() => { onSave(); return true; } }, { key:'Mod-Enter', preventDefault:true, run:() => { onShow(); return true; } }]),
@@ -79,7 +91,10 @@ export function createEditor(parent, { onChange, onSave, onDrop, onShow, project
           onDrop(files, current.posAtCoords({ x:event.clientX, y:event.clientY }) ?? current.state.selection.main.head);
           return true;
         } }),
-        EditorView.updateListener.of(update => { if (update.docChanged && !quiet) onChange(); }),
+        EditorView.updateListener.of(update => {
+          if (update.docChanged && !quiet) onChange();
+          if (update.selectionSet) onSelect(!update.state.selection.main.empty);
+        }),
       ],
     }),
   });
@@ -92,6 +107,15 @@ export function createEditor(parent, { onChange, onSave, onDrop, onShow, project
       view.dispatch({ changes:{ from:0, to:view.state.doc.length, insert:text }, selection:{ anchor:0 } });
       quiet = false;
     },
+    get selection() { const { from, to } = view.state.selection.main; return { from, to, text:view.state.sliceDoc(from, to) }; },
+    showMarks(items) {
+      const ranges = items.filter(item => item.to <= view.state.doc.length && item.from < item.to).sort((a, b) => a.from - b.from)
+        .map(item => Decoration.mark({ class:`note-${item.color}` }).range(item.from, item.to));
+      view.dispatch({ effects:setMarks.of(Decoration.set(ranges, true)) });
+    },
+    slice:(from, to) => view.state.sliceDoc(from, to),
+    replaceRange(from, to, text) { view.dispatch({ changes:{ from, to, insert:text } }); },
+    select(from, to) { view.dispatch({ selection:{ anchor:from, head:to }, effects:EditorView.scrollIntoView(from, { y:'center' }) }); view.focus(); },
     setKeys(mode) { view.dispatch({ effects:keyMode.reconfigure(keysFor(mode)) }); },
     insert(text, at = view.state.selection.main.head) {
       view.dispatch({ changes:{ from:at, to:at === view.state.selection.main.head ? view.state.selection.main.to : at, insert:text }, selection:{ anchor:at + text.length } });
