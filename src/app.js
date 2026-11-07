@@ -16,6 +16,9 @@ import { listVersions, readVersion, saveVersion } from './versions.js';
 import { markChanges } from './changes.js';
 import { stripComments, usedFiles } from './arxiv.js';
 import { HIGHLIGHTS, INTENTS, NOTES_PATH, locate, makeAnchor, parseNotes } from './annotations.js';
+import { parseBib, scanEntries, writeEntry } from './bib.js';
+import { auditEntry, findPaper } from './lookup.js';
+import { checkPdf, checkSource } from './blind.js';
 import { MAX_PASSAGE, buildMessages, parseReply, safeResult, wordEdits } from './revise.js';
 
 const AUTOSAVE_MS = 1200;
@@ -62,6 +65,13 @@ const editor = createEditor($('editor'), {
   project:projectIndex,
   keys:readKeys(),
   onShow:() => showInPdf(),
+  describeCite:key => {
+    const entry = bibEntries().find(item => item.key === key);
+    if (!entry) return `${key}: not in the bibliography`;
+    const { title, author, year } = entry.fields;
+    const notice = review.notices?.[key]?.length ? ` [${review.notices[key].join(', ')}]` : '';
+    return `${author ? `${author.split(/\s+and\s+/)[0].split(',')[0]} ` : ''}${year ? `(${year}) ` : ''}${title || key}${notice}`;
+  },
   onSelect:selected => { $('sel-bar').hidden = !selected || !editingText(); $('ai-tools').hidden = !aiReady(); },
   onDrop:(files, at) => dropFiles(files, at).catch(fail),
   onSave:() => saveNow().then(() => state.project && build()),
@@ -564,6 +574,102 @@ async function insertTable() {
 }
 
 const projectRoot = () => projectFolder(state.project);
+const bibFiles = () => Object.keys(state.texts).filter(path => /\.bib$/i.test(path));
+const bibEntries = () => bibFiles().flatMap(file => parseBib(state.texts[file]).entries.map(entry => ({ ...entry, file })));
+
+async function setText(path, text) {
+  await writeFile(path, text);
+  state.texts[path] = text;
+  if (!state.files.includes(path)) state.files = await listFiles(store, state.project);
+  if (path === state.path) editor.load(text);
+  state.revision += 1;
+  renderTree();
+}
+
+async function addPaper(input) {
+  say('Looking up the paper…');
+  const entry = await findPaper(input);
+  if (!entry) { say('No record found for that.', true); return null; }
+  const file = bibFiles()[0] || 'references.bib', existing = bibEntries();
+  const same = existing.find(item => item.key === entry.key || (entry.fields.doi && item.fields.doi?.toLowerCase() === entry.fields.doi.toLowerCase()));
+  if (same) { say(`Already in the bibliography as ${same.key}.`); return same; }
+  await setText(file, `${(state.texts[file] || '').trimEnd()}\n\n${writeEntry(entry)}`.trimStart());
+  say(`Added ${entry.key} to ${file}.`);
+  return entry;
+}
+
+function showChecks(title, rows) {
+  $('checks-title').textContent = title;
+  $('checks-list').replaceChildren(...rows.map(row => {
+    const item = document.createElement('li');
+    item.className = `check ${row.status || ''}`;
+    const go = document.createElement('button');
+    go.type = 'button'; go.className = 'problem'; go.dataset.command = 'check-go';
+    const head = document.createElement('strong');
+    head.textContent = row.title;
+    const place = document.createElement('span');
+    place.className = 'place';
+    place.textContent = row.detail || '';
+    go.append(head, place);
+    if (row.go) go.addEventListener('click', () => row.go().catch(fail));
+    item.append(go);
+    if (row.fix) {
+      const fix = document.createElement('button');
+      fix.type = 'button'; fix.className = 'btn small'; fix.dataset.command = 'check-fix'; fix.textContent = row.fixLabel;
+      fix.addEventListener('click', () => row.fix().then(() => { fix.disabled = true; }).catch(fail));
+      item.append(fix);
+    }
+    return item;
+  }));
+  $('tab-checks').click();
+}
+
+// Lookups run four at a time, because the services limit bursts.
+async function eachLimited(items, work, limit = 4) {
+  const results = [];
+  let next = 0;
+  await Promise.all(Array.from({ length:limit }, async () => {
+    while (next < items.length) { const index = next; next += 1; results[index] = await work(items[index]); }
+  }));
+  return results;
+}
+
+async function auditReferences() {
+  await saveNow();
+  const entries = bibEntries();
+  if (!entries.length) { say('This project has no bibliography entries.'); return []; }
+  const local = bibFiles().flatMap(file => scanEntries(parseBib(state.texts[file])).map(item => ({ title:item.message, detail:item.key ? `${file}: ${item.key}` : file, status:'warn' })));
+  say(`Checking ${entries.length} references…`);
+  const results = await eachLimited(entries, entry => auditEntry(entry));
+  review.notices = Object.fromEntries(results.filter(item => item.notices?.length).map(item => [item.key, item.notices]));
+  const labels = { checked:'Matches the record', update:'A record adds details', conflict:'Differs from the record', unmatched:'No record found', unavailable:'Could not check', skipped:'Skipped' };
+  const rows = results.map((result, index) => {
+    const notice = result.notices?.length ? `Notice: ${result.notices.join(', ')}. ` : '';
+    const row = { title:`${result.key}: ${labels[result.status]}`, detail:`${notice}${result.message || ''}`, status:result.notices?.length ? 'bad' : result.status };
+    if (result.replacement) Object.assign(row, { fixLabel:'Add the details', fix:() => replaceEntry(entries[index], result.replacement) });
+    return row;
+  });
+  const seen = results.filter(item => item.status === 'checked' || item.status === 'update').length;
+  showChecks(`References: ${seen} of ${entries.length} seen in a record`, [...local, ...rows]);
+  say(`Checked ${entries.length} references.`);
+  return results;
+}
+
+async function replaceEntry(entry, replacement) {
+  const text = state.texts[entry.file];
+  if (!parseBib(text).entries.some(item => item.key === entry.key && item.from === entry.from && item.to === entry.to)) throw new Error('This entry moved. Run the check again.');
+  await setText(entry.file, text.slice(0, entry.from) + writeEntry(replacement).trimEnd() + text.slice(entry.to));
+}
+
+async function submissionCheck() {
+  await saveNow();
+  const source = checkSource(state.texts).map(item => ({ title:item.message, detail:`${item.file}:${item.line}`, status:'warn', go:() => jump(item.file, item.line) }));
+  const facts = await pdf.inspect();
+  const fromPdf = facts ? checkPdf(facts).map(item => ({ title:item.message, detail:item.page ? `PDF page ${item.page}` : 'PDF', status:'warn' })) : [];
+  const rows = [...source, ...fromPdf];
+  showChecks(`Double-blind check: ${rows.length} ${rows.length === 1 ? 'finding' : 'findings'}${facts ? '' : ' (source only: build first to include the PDF)'}`, rows);
+  return rows;
+}
 
 const notesFile = () => `${projectRoot()}/${NOTES_PATH}`;
 const saveNotes = () => store.write(notesFile(), JSON.stringify({ notes:review.notes, rounds:review.rounds }, null, 1));
@@ -865,10 +971,14 @@ function bindPage() {
   $('proposal-reject').addEventListener('click', () => rejectProposal().catch(fail));
   $('proposal-again').addEventListener('click', () => tryAgain().catch(fail));
   $('revise-all').addEventListener('click', () => reviseRound().catch(fail));
-  for (const [tab, pane] of [['tab-problems', 'problems-list'], ['tab-notes', 'notes-list']]) $(tab).addEventListener('click', () => {
-    for (const other of ['problems-list', 'notes-list']) $(other).hidden = other !== pane;
-    for (const other of ['tab-problems', 'tab-notes']) $(other).setAttribute('aria-pressed', String(other === tab));
+  const tabs = [['tab-problems', 'problems-list'], ['tab-notes', 'notes-list'], ['tab-checks', 'checks']];
+  for (const [tab, pane] of tabs) $(tab).addEventListener('click', () => {
+    for (const [, other] of tabs) $(other).hidden = other !== pane;
+    for (const [other] of tabs) $(other).setAttribute('aria-pressed', String(other === tab));
   });
+  $('check-references').addEventListener('click', () => auditReferences().catch(fail));
+  $('check-blind').addEventListener('click', () => submissionCheck().catch(fail));
+  $('add-paper').addEventListener('click', () => { const input = prompt('arXiv id, DOI or exact title'); if (input) addPaper(input).catch(fail); });
   $('show-in-pdf').addEventListener('click', showInPdf);
   $('pdf-find').addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); findInPdf(event.shiftKey ? -1 : 1).catch(fail); } });
   $('zoom-in').addEventListener('click', () => pdf.zoomBy(0.2));
@@ -947,6 +1057,9 @@ const commands = {
   'versions.save':({ label }) => keepVersion(label),
   async 'versions.changes'({ id }) { const version = (await listVersions(store, projectRoot())).find(item => item.id === id); return changesPdf(version); },
   'arxiv.pack':() => arxivPack(),
+  'references.add':({ query }) => addPaper(query).then(entry => entry && { key:entry.key }),
+  'references.check':() => auditReferences().then(results => results.map(({ key, status, notices, message }) => ({ key, status, notices, message }))),
+  'submission.check':() => submissionCheck().then(rows => rows.map(({ title, detail }) => ({ title, detail }))),
   'notes.list':() => review.notes.map(({ id, file, body, intent, color, status, anchor }) => ({ id, file, body, intent, color, status, quote:anchor.quote })),
   async 'notes.add'({ file, quote, body, intent }) {
     const at = state.texts[file]?.indexOf(quote) ?? -1;

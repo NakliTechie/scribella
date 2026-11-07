@@ -32,6 +32,7 @@ dialog{border:1px solid var(--line);border-radius:8px;padding:16px;width:min(560
 #sel-bar{padding:4px 10px;border-bottom:1px solid var(--line);display:flex;gap:6px;align-items:center;background:var(--bg)}#sel-bar select{font-size:12px;padding:2px}
 #proposal{padding:8px 10px;border-bottom:2px solid var(--brand);background:#fff}#proposal-edits li{padding:2px 0;font-size:13px;border:0}del{color:var(--bad)}ins{color:var(--brand);text-decoration:underline}.note{padding:2px 10px 8px;border-bottom:1px solid var(--line)}.note.resolved{opacity:.6}.note.rejected strong{color:var(--warn)}
 .note-note{background:#f2c94c44}.note-check{background:#fff3a8}.note-keep{background:#c8efc8}.note-cite{background:#c8dfff}.note-rewrite{background:#ffd0e0}.note-question{background:#ffe0b8}.note-idea{background:#e4d4ff}
+.check{padding:2px 10px 6px;border-bottom:1px solid var(--line)}.check.bad strong,.check.conflict strong{color:var(--bad)}.check.warn strong,.check.update strong{color:var(--warn)}.cite-tip{padding:4px 8px;max-width:420px;font-size:13px}
 #new-file-form{padding:6px 8px}#new-file-form input{width:100%}
 #centre{display:grid;grid-template-rows:auto auto minmax(0,1fr) minmax(90px,32%);min-width:0;border-right:1px solid var(--line)}
 #file-name{padding:4px 10px;border-bottom:1px solid var(--line);color:var(--soft);font-size:13px}
@@ -114,8 +115,13 @@ body[data-building] #status::before{content:"● ";color:var(--brand)}
       <div id="editor"></div>
       <div id="not-text" hidden>This file is not text, so it opens only in the build.</div>
       <div id="problems-pane">
-        <div class="tabs"><button id="tab-problems" class="tab" aria-pressed="true" data-command="tab-problems"><span id="problem-count">No problems</span></button><button id="tab-notes" class="tab" aria-pressed="false" data-command="tab-notes"><span id="notes-tab">Notes (0)</span></button><button id="revise-all" class="btn small" data-command="revise-all" hidden>Revise all notes</button></div>
+        <div class="tabs"><button id="tab-problems" class="tab" aria-pressed="true" data-command="tab-problems"><span id="problem-count">No problems</span></button><button id="tab-notes" class="tab" aria-pressed="false" data-command="tab-notes"><span id="notes-tab">Notes (0)</span></button><button id="tab-checks" class="tab" aria-pressed="false" data-command="tab-checks">Checks</button><button id="revise-all" class="btn small" data-command="revise-all" hidden>Revise all notes</button></div>
         <div id="problems-list"><ul id="problems"></ul></div>
+        <div id="checks" hidden>
+          <div class="rail-actions" style="padding:6px 10px"><button id="add-paper" class="btn small" data-command="add-paper">Add a paper</button><button id="check-references" class="btn small" data-command="check-references">Check references</button><button id="check-blind" class="btn small" data-command="check-blind">Double-blind check</button></div>
+          <strong id="checks-title" style="padding:0 10px"></strong>
+          <ul id="checks-list"></ul>
+        </div>
         <div id="notes-list" hidden>
           <div id="proposal" hidden>
             <strong id="proposal-reason"></strong>

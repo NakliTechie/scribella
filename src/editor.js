@@ -65,7 +65,20 @@ const marks = StateField.define({
   provide:field => EditorView.decorations.from(field),
 });
 
-export function createEditor(parent, { onChange, onSave, onDrop, onShow, onSelect = () => {}, project, path, keys = 'default' }) {
+// The citation key under the pointer, as { from, to, key }, or null.
+export function citeAt(text, pos) {
+  const line = text.lastIndexOf('\n', pos - 1) + 1, end = text.indexOf('\n', pos);
+  for (const match of text.slice(line, end < 0 ? text.length : end).matchAll(/\\[A-Za-z]*cite[a-zA-Z]*\*?(?:\[[^\]]*\])*\{([^}]*)\}/g)) {
+    let at = line + match.index + match[0].lastIndexOf('{') + 1;
+    for (const part of match[1].split(',')) {
+      if (pos >= at && pos <= at + part.length) return { from:at, to:at + part.length, key:part.trim() };
+      at += part.length + 1;
+    }
+  }
+  return null;
+}
+
+export function createEditor(parent, { onChange, onSave, onDrop, onShow, onSelect = () => {}, describeCite = () => '', project, path, keys = 'default' }) {
   let quiet = false;
   const keyMode = new Compartment();
   const keysFor = mode => (mode === 'vim' ? vim() : mode === 'emacs' ? emacs() : []);
@@ -77,6 +90,16 @@ export function createEditor(parent, { onChange, onSave, onDrop, onShow, onSelec
         keyMode.of(keysFor(keys)),
         basicSetup,
         mathHover,
+        hoverTooltip((current, pos) => {
+          const cite = citeAt(current.state.doc.toString(), pos), text = cite && describeCite(cite.key);
+          if (!text) return null;
+          return { pos:cite.from, end:cite.to, above:true, create() {
+            const dom = document.createElement('div');
+            dom.className = 'cite-tip';
+            dom.textContent = text;
+            return { dom };
+          } };
+        }),
         marks,
         StreamLanguage.define(stex),
         EditorView.lineWrapping,

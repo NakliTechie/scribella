@@ -152,6 +152,27 @@ export function createPdfView(scroller, { onPages = () => {}, onPoint = () => {}
       }
       return found;
     },
+    // What the PDF says about itself, for the submission check.
+    async inspect() {
+      if (!doc) return null;
+      const { info, metadata } = await doc.getMetadata();
+      const facts = { author:info?.Author || metadata?.get?.('dc:creator')?.toString() || '', creator:info?.Creator || '', links:[], fonts:[] };
+      const seen = new Set();
+      for (let number = 1; number <= doc.numPages; number += 1) {
+        const page = await doc.getPage(number);
+        for (const item of await page.getAnnotations()) if (item.url) facts.links.push({ page:number, url:item.url });
+        const list = await page.getOperatorList();
+        for (let index = 0; index < list.fnArray.length; index += 1) {
+          if (list.fnArray[index] !== pdfjs.OPS.setFont) continue;
+          const name = list.argsArray[index][0];
+          if (seen.has(name)) continue;
+          seen.add(name);
+          const font = page.commonObjs.has(name) ? page.commonObjs.get(name) : null;
+          if (font) facts.fonts.push({ page:number, name:font.name || name, type3:!!font.isType3Font, embedded:!font.missingFile });
+        }
+      }
+      return facts;
+    },
     get pages() { return doc?.numPages ?? 0; },
   };
 }

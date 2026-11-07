@@ -16,6 +16,9 @@ import { readFileSync } from 'node:fs';
 import { keepsProtected, protectedSpans } from '../src/protected.js';
 import { locate, makeAnchor, parseNotes } from '../src/annotations.js';
 import { applyEdits, buildMessages, parseReply, safeResult, wordEdits } from '../src/revise.js';
+import { citeKey, parseBib, sameWork, scanEntries, writeEntry } from '../src/bib.js';
+import { auditEntry, findPaper, fromCrossref, noticesOf } from '../src/lookup.js';
+import { checkPdf, checkSource } from '../src/blind.js';
 import { cleanFilePath, loadVenues, createProject, findMain, listFiles, listProjects, readSettings } from '../src/project.js';
 
 test('an unknown command gets a one-click fix when it is a near typo', () => {
@@ -345,4 +348,85 @@ test('thesis templates start on XeLaTeX', async () => {
   const store = memoryStore();
   await createProject(store, 'T', 'thuthesis', await loadVenues(load));
   assert.equal((await readSettings(store, 'T')).engine, 'xelatex');
+});
+
+const BIB = `@article{a1, title = {The {T}itle}, author = "Knuth, Donald and Lamport, Leslie", journal = {J}, year = 1984 }
+@inproceedings{a1,
+  title = {No year},
+  journal = {Wrong},
+  booktitle = {B},
+  author = {X, Y},
+  year = {19xx}
+}
+@string{s = "v"}
+@thing{b2,}
+`;
+
+test('BibTeX parses braces, quotes and bare values, and the local scan finds problems', () => {
+  const parsed = parseBib(BIB);
+  assert.equal(parsed.entries.length, 3);
+  assert.equal(parsed.entries[0].fields.title, 'The {T}itle');
+  assert.equal(parsed.entries[0].fields.year, '1984');
+  assert.equal(BIB.slice(parsed.entries[0].from, parsed.entries[0].to).endsWith('}'), true);
+  const messages = scanEntries(parsed).map(item => item.message);
+  assert.ok(messages.includes('This key appears twice.'));
+  assert.ok(messages.some(item => /not four digits/.test(item)));
+  assert.ok(messages.some(item => /Unknown entry type thing/.test(item)));
+  assert.ok(messages.some(item => /has a journal/.test(item)));
+  assert.equal(parseBib('@article{x, title={a').problems.length, 1);
+  assert.match(writeEntry({ type:'misc', key:'k', fields:{ title:'T', year:'' } }), /title = \{T\}/);
+});
+
+test('sameWork needs the title and the ordered authors', () => {
+  const a = { title:'A {Big} Paper', author:'Knuth, Donald and Lamport, Leslie' };
+  assert.equal(sameWork(a, { title:'a big paper', author:'Donald Knuth and Leslie Lamport' }), true);
+  assert.equal(sameWork(a, { title:'a big paper', author:'Lamport, Leslie and Knuth, Donald' }), false);
+  assert.equal(sameWork(a, { title:'a bigger paper', author:a.author }), false);
+  assert.equal(citeKey({ author:'Knuth, D', title:'The Art of Code', year:'1968' }), 'knuth1968code');
+});
+
+const WORK = { type:'journal-article', title:['The Title'], author:[{ family:'Knuth', given:'Donald' }], 'container-title':['J'], issued:{ 'date-parts':[[1984]] }, DOI:'10.1/x', page:'1-2', 'updated-by':[{ type:'retraction' }] };
+const answer = body => async () => new Response(JSON.stringify(body), { status:200 });
+
+test('Crossref records become entries, and notices are read', () => {
+  assert.equal(fromCrossref(WORK).type, 'article');
+  assert.equal(fromCrossref(WORK).fields.author, 'Knuth, Donald');
+  assert.deepEqual(noticesOf(WORK), ['retracted']);
+});
+
+test('the audit never counts a failure as checked, and refuses a different paper', async () => {
+  const entry = { key:'k', fields:{ title:'The Title', author:'Knuth, Donald', doi:'10.1/x' } };
+  const result = await auditEntry(entry, answer({ message:WORK }));
+  assert.equal(result.status, 'update');
+  assert.deepEqual(result.notices, ['retracted']);
+  assert.equal(result.replacement.fields.pages, '1-2');
+  assert.equal((await auditEntry(entry, async () => { throw new Error('offline'); })).status, 'unavailable');
+  assert.equal((await auditEntry(entry, async () => new Response('', { status:500 }))).status, 'unavailable');
+  assert.equal((await auditEntry(entry, async () => new Response('', { status:404 }))).status, 'unmatched');
+  assert.equal((await auditEntry({ key:'k', fields:{ ...entry.fields, title:'Another' } }, answer({ message:WORK }))).status, 'conflict');
+  assert.equal((await auditEntry({ key:'k', fields:{ pubstate:'preprint', title:'x' } })).status, 'skipped');
+});
+
+test('findPaper routes DOIs, arXiv ids and titles', async () => {
+  const seen = [];
+  const load = async url => { seen.push(url); return new Response(JSON.stringify(/openalex/.test(url) ? { title:'T', authorships:[{ author:{ display_name:'Ada Lovelace' } }], publication_year:2020 } : { message:{ ...WORK, items:[WORK] } })); };
+  assert.equal((await findPaper('https://doi.org/10.1234/x.', load)).fields.doi, '10.1/x');
+  const arxiv = await findPaper('arXiv:1706.03762v2', load);
+  assert.equal(arxiv.fields.eprint, '1706.03762');
+  assert.equal(arxiv.fields.author, 'Lovelace, Ada');
+  assert.equal((await findPaper('The Title', load)).key, 'knuth1984title');
+  assert.ok(seen[1].includes('10.48550'));
+});
+
+test('the double-blind check reads source and PDF facts', () => {
+  const found = checkSource({ 'a.tex':'\\usepackage[final]{neurips_2026}\n\\author{A\\thanks{x}}\n\\url{https://github.com/me}\n% \\thanks{hidden}\nIn our previous work we did this.\n\\section*{Acknowledgements}\n' });
+  assert.equal(found.length, 5);
+  const pdfFound = checkPdf({ author:'Me', links:[{ page:2, url:'https://github.com/me/repo' }, { page:2, url:'https://arxiv.org/abs/1' }], fonts:[{ page:1, name:'F', type3:true, embedded:true }, { page:1, name:'G', type3:false, embedded:false }] });
+  assert.equal(pdfFound.length, 4);
+});
+
+test('preprints are checked against OpenAlex', async () => {
+  const load = async () => new Response(JSON.stringify({ title:'T One', authorships:[{ author:{ display_name:'Ada Lovelace' } }] }));
+  assert.equal((await auditEntry({ key:'k', fields:{ title:'T One', author:'Lovelace, Ada', doi:'10.48550/arXiv.1706.03762' } }, load)).status, 'checked');
+  assert.equal((await auditEntry({ key:'k', fields:{ title:'Other', author:'Lovelace, Ada', eprint:'1706.03762' } }, load)).status, 'conflict');
 });

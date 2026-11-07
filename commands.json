@@ -339,6 +339,40 @@
           "id"
         ]
       }
+    },
+    {
+      "name": "references.add",
+      "description": "Add a paper to the Scribella bibliography by arXiv id, DOI or exact title.",
+      "scope": "write",
+      "input": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "references.check",
+      "description": "Check the Scribella bibliography against Crossref, with retraction notices.",
+      "scope": "read",
+      "input": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "submission.check",
+      "description": "Check a Scribella paper for anything that reveals its authors before double-blind submission.",
+      "scope": "read",
+      "input": {
+        "type": "object",
+        "properties": {}
+      }
     }
   ],
   "parity": {
@@ -393,6 +427,12 @@
     "rewrite": "person: a revision waits on the person's decision",
     "revise-all": "person: a round waits on the person's decisions",
     "tab-problems": "view",
-    "tab-notes": "view"
+    "tab-notes": "view",
+    "add-paper": "references.add",
+    "check-references": "references.check",
+    "check-blind": "submission.check",
+    "check-go": "view",
+    "check-fix": "person: applying a bibliography change is the person's own decision",
+    "tab-checks": "view"
   }
 }
