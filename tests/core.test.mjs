@@ -283,7 +283,7 @@ test('the arXiv pack holds what the paper uses', () => {
 test('every venue template lists files that exist, and creates a project', async () => {
   const load = async path => new Response(readFileSync(new URL(`../${path.slice(2)}`, import.meta.url)));
   const venues = await loadVenues(load);
-  assert.equal(Object.keys(venues).length, 5);
+  assert.equal(Object.keys(venues).length, 6);
   const store = memoryStore();
   assert.equal(await createProject(store, 'Paper', 'neurips-2026', venues), 'Paper');
   assert.match(await store.read('projects/Paper/main.tex'), /neurips_2026/);
@@ -466,7 +466,7 @@ test('formatting changes only indentation, and leaves verbatim alone', () => {
 
 test('the .aux gives label numbers, and the bibliography log gives problems', () => {
   assert.deepEqual(parseLabels('\\newlabel{sec:a}{{2.1}{3}{Title}{section.2}{}}').get('sec:a'), { number:'2.1', page:'3' });
-  assert.deepEqual(parseBlg('Warning--empty journal in x\nI found no database files\n').map(item => item.severity), ['warning', 'error']);
+  assert.deepEqual(parseBlg('Warning--empty journal in x\nI found no \\citation commands\nRepeated entry---line 3\n').map(item => item.severity), ['warning', 'error']);
 });
 
 test('spellcheck sees prose only, with offsets unchanged', () => {
