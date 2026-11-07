@@ -58,11 +58,21 @@ export async function listProjects(store) {
   return (await store.list(ROOT)).filter(entry => entry.endsWith('/')).map(entry => entry.slice(0, -1).split('/').pop()).sort();
 }
 
-export async function createProject(store, name, templateId = 'article') {
-  const clean = safeName(name), template = TEMPLATES[templateId];
+// Venue templates ship as files beside the page; `load` reads one as bytes.
+export async function loadVenues(load = path => fetch(path).then(reply => { if (!reply.ok) throw new Error(`Could not load ${path}`); return reply; })) {
+  const list = await (await load('./templates/index.json')).json();
+  return Object.fromEntries(Object.entries(list).map(([id, venue]) => [id, { ...venue, async read() {
+    return Object.fromEntries(await Promise.all(venue.files.map(async file => [file, new Uint8Array(await (await load(`./templates/${id}/${file}`)).arrayBuffer())])));
+  } }]));
+}
+
+export async function createProject(store, name, templateId = 'article', venues = {}) {
+  const clean = safeName(name), template = TEMPLATES[templateId] || venues[templateId];
   if (!clean) throw new Error('Give the project a name.');
+  if (!template) throw new Error(`There is no template ${templateId}.`);
   if (await store.exists(projectFolder(clean))) throw new Error(`A project called ${clean} already exists.`);
-  for (const [path, text] of Object.entries(template.files)) await store.write(`${projectFolder(clean)}/${path}`, text);
+  const files = template.read ? await template.read() : template.files;
+  for (const [path, data] of Object.entries(files)) await store.write(`${projectFolder(clean)}/${path}`, data);
   await writeSettings(store, clean, { main:template.main, engine:'pdflatex' });
   return clean;
 }

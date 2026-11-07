@@ -27,6 +27,7 @@ main{display:grid;grid-template-columns:210px minmax(0,1fr) minmax(0,1fr);min-he
 .file-pick{position:relative;overflow:hidden}.file-pick input{position:absolute;inset:0;opacity:0;cursor:pointer}
 .rail-actions{flex-wrap:wrap}#search-box{padding:0 8px;display:grid;gap:4px}#search-box input[type=search],#search-box input[type=text]{width:100%}#search-box label{font-size:12px;color:var(--soft);display:inline-flex;gap:3px;align-items:center;margin-right:8px}#search-count{font-size:12px;color:var(--soft)}#search-results .row{font-size:12px}
 dialog{border:1px solid var(--line);border-radius:8px;padding:16px;width:min(560px,92vw);color:var(--ink)}dialog::backdrop{background:#0004}dialog h1{font-size:16px}dialog textarea{width:100%;height:180px;font:12px ui-monospace,monospace;border:1px solid var(--line);border-radius:5px;padding:6px}dialog .end{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}#symbols{max-height:50vh;overflow:auto;display:flex;flex-wrap:wrap;gap:4px}#symbols h2{width:100%;margin:8px 0 2px}.math-tip{padding:6px 10px;font-size:15px;background:#fff}
+.version{padding:3px 8px;font-size:12px;display:flex;flex-wrap:wrap;gap:4px;align-items:center}.version span{width:100%;color:var(--soft)}
 #new-file-form{padding:6px 8px}#new-file-form input{width:100%}
 #centre{display:grid;grid-template-rows:auto minmax(0,1fr) minmax(90px,32%);min-width:0;border-right:1px solid var(--line)}
 #file-name{padding:4px 10px;border-bottom:1px solid var(--line);color:var(--soft);font-size:13px}
@@ -68,6 +69,8 @@ body[data-building] #status::before{content:"● ";color:var(--brand)}
     <select id="insert" data-command="insert" aria-label="Insert"><option value="">Insert…</option><option value="figure">Figure</option><option value="table">Table from data</option><option value="symbol">Symbol</option></select>
     <select id="keys" data-command="keys" aria-label="Keys"><option value="default">Standard keys</option><option value="vim">Vim</option><option value="emacs">Emacs</option></select>
     <label><input id="auto" type="checkbox" checked data-command="toggle-auto"> Build on save</label>
+    <button id="save-version" class="btn" data-command="save-version">Save version</button>
+    <button id="arxiv" class="btn" data-command="arxiv">arXiv pack</button>
     <button id="export" class="btn" data-command="export">Export</button>
     <button id="build" class="btn primary" data-command="build">Build</button>
     <button id="cancel" class="btn" data-command="cancel-build" hidden>Stop</button>
@@ -85,6 +88,8 @@ body[data-building] #status::before{content:"● ";color:var(--brand)}
       </div>
       <h2>Outline</h2>
       <ul id="outline"></ul>
+      <h2>Versions</h2>
+      <ul id="versions"></ul>
       <h2>Search</h2>
       <div id="search-box">
         <input id="search-query" type="search" placeholder="Find in project" aria-label="Find in project" data-command="search-query">

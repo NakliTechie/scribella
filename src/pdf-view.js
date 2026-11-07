@@ -144,10 +144,10 @@ export function createPdfView(scroller, { onPages = () => {}, onPoint = () => {}
         const page = await doc.getPage(number);
         const height = page.getViewport({ scale:1 }).height;
         for (const item of (await page.getTextContent()).items) {
-          const at = item.str?.toLowerCase().indexOf(needle) ?? -1;
-          if (at < 0) continue;
-          const perChar = item.width / Math.max(item.str.length, 1);
-          found.push({ page:number, x:item.transform[4] + perChar * at, y:height - item.transform[5] - item.height, width:perChar * query.length, height:item.height || 10 });
+          const text = item.str?.toLowerCase() || '', perChar = item.width / Math.max(text.length, 1);
+          for (let at = text.indexOf(needle); at >= 0; at = text.indexOf(needle, at + needle.length)) {
+            found.push({ page:number, x:item.transform[4] + perChar * at, y:height - item.transform[5] - item.height, width:perChar * query.length, height:item.height || 10 });
+          }
         }
       }
       return found;

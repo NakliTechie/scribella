@@ -1,6 +1,7 @@
 // Reads a .synctex file and answers both questions: where in the PDF is this source line, and which source line made
 // this point of the PDF. Positions are PDF points from the top left of the page.
 const SP_PER_BP = 65781.76;
+const MAX_LINE = 30;
 
 const number = (text, previous) => (text === '=' ? previous : Number(text));
 
@@ -55,18 +56,24 @@ export function forward(sync, file, line) {
     }
   }
   if (!best) return null;
-  const onLine = [...sync.pages.get(best.page)].filter(record => tags.includes(record.tag) && record.line === best.line);
-  const boxes = onLine.filter(record => record.width > 0);
+  const all = sync.pages.get(best.page).filter(record => tags.includes(record.tag) && record.line === best.line);
+  // A box around a scaled figure can start far off the line, so text records win when there are any.
+  const text = all.filter(record => 'hxkg$'.includes(record.kind) && record.height <= MAX_LINE);
+  const onLine = text.length ? text : all;
   const left = Math.min(...onLine.map(record => record.x));
-  const top = Math.min(...onLine.map(record => record.y - record.height));
-  const bottom = Math.max(...onLine.map(record => record.y + record.depth));
-  const right = Math.max(left, ...boxes.map(record => record.x + record.width), ...onLine.map(record => record.x));
-  return { page:best.page, file, line:best.line, x:left, y:top, width:right - left, height:Math.max(bottom - top, 10) };
+  const top = Math.max(0, Math.min(...onLine.map(record => record.y - Math.min(record.height, MAX_LINE))));
+  const bottom = Math.max(...onLine.map(record => record.y + Math.min(record.depth, MAX_LINE)));
+  const right = Math.max(left, ...onLine.map(record => record.x + record.width));
+  return { page:best.page, file, line:best.line, x:left, y:top, width:right - left, height:Math.min(Math.max(bottom - top, 10), MAX_LINE * 2) };
 }
 
-// The smallest box around the point, else the nearest record on the page. Files outside the project are skipped.
-export function inverse(sync, page, x, y) {
-  const records = (sync.pages.get(page) || []).filter(record => !(sync.inputs.get(record.tag) || '/').startsWith('/') && record.line > 0);
+// The smallest box around the point, else the nearest record on the page. Generated files such as the .bbl are skipped.
+export function inverse(sync, page, x, y, files = null) {
+  const known = record => {
+    const path = (sync.inputs.get(record.tag) || '/').replace(/^\.\//, '');
+    return !path.startsWith('/') && (!files || files.has(path));
+  };
+  const records = (sync.pages.get(page) || []).filter(record => known(record) && record.line > 0);
   if (!records.length) return null;
   const inside = records.filter(record => record.width > 0 && x >= record.x && x <= record.x + record.width && y >= record.y - record.height && y <= record.y + record.depth)
     .sort((a, b) => a.width * (a.height + a.depth) - b.width * (b.height + b.depth));

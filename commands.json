@@ -38,10 +38,7 @@
           },
           "template": {
             "type": "string",
-            "enum": [
-              "article",
-              "blank"
-            ]
+            "description": "article, blank, neurips-2026, icml-2026, iclr-2026, acl, cvpr-2027, aaai-2027, thuthesis or ustcthesis"
           }
         },
         "required": [
@@ -232,6 +229,56 @@
           "y"
         ]
       }
+    },
+    {
+      "name": "versions.list",
+      "description": "List the saved versions of the open Scribella project.",
+      "scope": "read",
+      "input": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "versions.save",
+      "description": "Save a named version of the open Scribella project.",
+      "scope": "write",
+      "input": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "label"
+        ]
+      }
+    },
+    {
+      "name": "versions.changes",
+      "description": "Show a PDF of what changed since a saved Scribella version.",
+      "scope": "write",
+      "input": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "arxiv.pack",
+      "description": "Make an arXiv zip of the open Scribella project, with comments removed, and check that it builds alone.",
+      "scope": "write",
+      "input": {
+        "type": "object",
+        "properties": {}
+      }
     }
   ],
   "parity": {
@@ -266,6 +313,10 @@
     "insert-table": "file.write",
     "keys": "view",
     "show-in-pdf": "pdf.locate",
-    "pdf-find": "view"
+    "pdf-find": "view",
+    "save-version": "versions.save",
+    "version-changes": "versions.changes",
+    "version-restore": "person: restoring replaces the person's text, so it stays their choice",
+    "arxiv": "arxiv.pack"
   }
 }

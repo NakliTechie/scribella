@@ -9,7 +9,11 @@ import { findAll, findTodos, replaceAllIn } from '../src/search.js';
 import { escapeText, figureBlock, needsBooktabs, parseTable, tableBlock } from '../src/insert.js';
 import { makeZip, readZip } from '../src/zip.js';
 import { forward, inverse, parseSynctex } from '../src/synctex.js';
-import { cleanFilePath, createProject, findMain, listFiles, listProjects, readSettings } from '../src/project.js';
+import { diffLists, markChanges } from '../src/changes.js';
+import { stripComments, usedFiles } from '../src/arxiv.js';
+import { listVersions, readVersion, saveVersion } from '../src/versions.js';
+import { readFileSync } from 'node:fs';
+import { cleanFilePath, loadVenues, createProject, findMain, listFiles, listProjects, readSettings } from '../src/project.js';
 
 test('an unknown command gets a one-click fix when it is a near typo', () => {
   const source = 'a \\citep{x} b \\citep{y}\nc \\cietp{z}\n';
@@ -230,4 +234,57 @@ test('special characters are escaped once, in cells and captions', () => {
 
 test('LuaLaTeX-only packages ask for LuaLaTeX', () => {
   assert.equal(explain({ kind:'tex', message:'Package foo Error: This package requires LuaTeX.' }).engine, 'lualatex');
+});
+
+test('versions save, list newest first and read back', async () => {
+  const store = memoryStore();
+  await saveVersion(store, 'p', { 'a.tex':'one' }, 'First', 1);
+  await saveVersion(store, 'p', { 'a.tex':'two' }, 'Second', 2);
+  assert.deepEqual((await listVersions(store, 'p')).map(item => item.label), ['Second', 'First']);
+  assert.equal((await readVersion(store, 'p', '1'))['a.tex'], 'one');
+});
+
+test('changes mark prose and leave hard paragraphs alone', () => {
+  assert.deepEqual(diffLists(['a', 'b'], ['a', 'c']).map(edit => edit[0]), ['=', '-', '+']);
+  const old = '\\documentclass{article}\n\\begin{document}\n\nThe quick fox.\n\nGone away.\n\n$x=1$ math\n\n\\end{document}';
+  const next = '\\documentclass{article}\n\\begin{document}\n\nThe slow fox.\n\n$x=2$ math\n\n\\end{document}';
+  const marked = markChanges(old, next);
+  assert.ok(marked.includes('The \\DIFdel{quick} \\DIFadd{slow} fox.'));
+  assert.ok(marked.includes('\\DIFdel{Gone away.}'));
+  assert.ok(marked.includes('$x=2$ math'));
+  assert.ok(!marked.includes('$x=1$'));
+  assert.ok(marked.indexOf('ulem') < marked.indexOf('\\begin{document}'));
+  assert.ok(markChanges('', next).includes('\\DIFadd{The slow fox.}'), 'a file new since the version is all additions');
+});
+
+test('comments go, and what TeX reads stays', () => {
+  const { text, removed } = stripComments('a % note\n% whole line\n100\\% sure\nb%\n\\begin{verbatim}\n% kept\n\\end{verbatim}\n\\url{x%20y}');
+  assert.equal(text, 'a %\n100\\% sure\nb%\n\\begin{verbatim}\n% kept\n\\end{verbatim}\n\\url{x%20y}');
+  assert.equal(removed, 2);
+});
+
+test('the arXiv pack holds what the paper uses', () => {
+  const texts = { 'main.tex':'\\documentclass{mine}\\usepackage{local,amsmath}\\input{sec/a}\\bibliographystyle{plain2}\\includegraphics[width=1in]{fig/p}\\input{gone}', 'sec/a.tex':'\\includegraphics{b}', 'unused.tex':'x', 'mine.cls':'', 'local.sty':'' };
+  const files = [...Object.keys(texts), 'fig/p.png', 'sec/b.pdf', 'plain2.bst', 'extra.png'];
+  const { used, missing } = usedFiles({ files, texts, main:'main.tex' });
+  assert.deepEqual(used, ['fig/p.png', 'local.sty', 'main.tex', 'mine.cls', 'plain2.bst', 'sec/a.tex', 'sec/b.pdf']);
+  assert.deepEqual(missing, ['gone']);
+});
+
+test('every venue template lists files that exist, and creates a project', async () => {
+  const load = async path => new Response(readFileSync(new URL(`../${path.slice(2)}`, import.meta.url)));
+  const venues = await loadVenues(load);
+  assert.equal(Object.keys(venues).length, 8);
+  const store = memoryStore();
+  assert.equal(await createProject(store, 'Paper', 'neurips-2026', venues), 'Paper');
+  assert.match(await store.read('projects/Paper/main.tex'), /neurips_2026/);
+  assert.ok((await listFiles(store, 'Paper')).includes('neurips_2026.sty'));
+});
+
+test('SyncTeX: a figure box cannot throw the view off the page, and generated files are skipped', () => {
+  const text = 'Input:1:main.tex\nInput:2:main.bbl\nUnit:1\n{1\n[1,8:6578176,1000000:30000000,50000000,0\nx1,8:6578176,6578176\nh2,3:6578176,6578176:6578176,657817,0\n}1\n';
+  const sync = parseSynctex(text);
+  const box = forward(sync, 'main.tex', 8);
+  assert.ok(box.y >= 0 && box.height <= 60);
+  assert.deepEqual(inverse(sync, 1, 110, 100, new Set(['main.tex'])), { file:'main.tex', line:8 });
 });

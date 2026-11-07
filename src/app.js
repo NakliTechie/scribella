@@ -1,7 +1,7 @@
 // Scribella's page: wires storage, the editor, builds and the PDF pane. Writing works everywhere; compiling needs the
 // NakliOS TeX service, because the engine lives there.
 import { browserStore, hostStore } from './storage.js';
-import { TEMPLATES, cleanFilePath, createProject, findMain, isImage, isText, listFiles, listProjects, projectFolder, readSettings, safeName, writeSettings } from './project.js';
+import { TEMPLATES, cleanFilePath, createProject, findMain, isImage, isText, listFiles, listProjects, loadVenues, projectFolder, readSettings, safeName, writeSettings } from './project.js';
 import { createBuilder } from './build.js';
 import { createEditor } from './editor.js';
 import { createPdfView } from './pdf-view.js';
@@ -12,6 +12,9 @@ import { findAll, findTodos, replaceAllIn } from './search.js';
 import { SYMBOLS, figureBlock, needsBooktabs, parseTable, slug, tableBlock } from './insert.js';
 import { makeZip, readZip } from './zip.js';
 import { forward, inverse, readSynctex } from './synctex.js';
+import { listVersions, readVersion, saveVersion } from './versions.js';
+import { markChanges } from './changes.js';
+import { stripComments, usedFiles } from './arxiv.js';
 
 const AUTOSAVE_MS = 1200;
 const OUTSIDE_EDIT_MS = 1500;
@@ -26,6 +29,8 @@ const COMPILE_HINT = () => (naklios?.capabilities?.hosted
 
 let store = null, storeKind = null;
 const state = { sync:null, builtRevision:null, findHits:[], findIndex:-1, project:null, settings:{}, files:[], texts:{}, path:null, dirty:false, revision:0, problems:[], log:'', job:null, auto:true };
+let venues = {};
+const SCRATCH = 'scratch-build';
 let saveTimer = null, outsideTimer = null, stopWatching = null;
 const readKeys = () => { try { return localStorage.getItem(KEYS_ITEM) || 'default'; } catch (_) { return 'default'; } };
 
@@ -209,6 +214,8 @@ async function afterBuild({ result, stale, revision = state.revision }) {
     await pdf.show(await store.readBinary(result.pdf));
     state.sync = result.synctex ? await readSynctex(await store.readBinary(result.synctex)).catch(() => null) : null;
     state.builtRevision = revision;
+    state.findQuery = '';
+    if (revision === state.revision) writeSettings(store, state.project, Object.assign(state.settings, { builtHash:sourceHash() })).catch(() => {});
   }
   const errors = state.problems.filter(item => item.severity === 'error').length;
   if (result.ok) say(stale ? 'Built. More edits are waiting.' : 'Built.');
@@ -232,6 +239,13 @@ function build() {
   builder.request(state.revision);
 }
 
+// Says whether the saved PDF was built from the text now in the project.
+function sourceHash() {
+  let hash = 2166136261;
+  for (const path of Object.keys(state.texts).sort()) for (const char of path + state.texts[path]) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
+  return hash >>> 0;
+}
+
 // Lines move as you type, so a jump only trusts a PDF built from the text on screen.
 const syncReady = () => {
   if (!state.sync) { say('Build the paper first.'); return false; }
@@ -248,7 +262,7 @@ function showInPdf() {
 
 async function goToSource({ page, x, y }) {
   if (!syncReady()) return null;
-  const place = inverse(state.sync, page, x, y);
+  const place = inverse(state.sync, page, x, y, new Set(state.files));
   if (!place) { say('Nothing in your project made this spot.'); return null; }
   await jump(place.file, place.line);
   return place;
@@ -290,7 +304,7 @@ async function outsideChange(event) {
     // Our own saves arrive here too; they match what we hold.
     if (text === state.texts[path]) return;
     if (path === state.path && state.dirty) {
-      const copy = `${path}.outside.txt`;
+      const copy = `${path}.outside-${Date.now()}.txt`;
       await writeFile(copy, text);
       state.files = await listFiles(store, state.project);
       state.texts[copy] = text;
@@ -335,12 +349,13 @@ async function openProject(name) {
   document.title = `${name} — Scribella`;
   await openFile(state.settings.main || state.files[0]);
   showCounts();
+  await renderVersions();
   await watchProject(name).catch(error => console.error('Watching the project failed', error));
   const last = state.settings.main && `${projectFolder(name)}/.tex-build/${state.settings.main.replace(/^.*\//, '').replace(/\.[^.]+$/, '')}.pdf`;
   if (last && await store.exists(last)) {
     await pdf.show(await store.readBinary(last));
     const sync = last.replace(/\.pdf$/, '.synctex.gz');
-    if (await store.exists(sync)) { state.sync = await readSynctex(await store.readBinary(sync)).catch(() => null); state.builtRevision = state.revision; }
+    if (await store.exists(sync) && state.settings.builtHash === sourceHash()) { state.sync = await readSynctex(await store.readBinary(sync)).catch(() => null); state.builtRevision = state.revision; }
   }
   say(canCompile() ? 'Ready.' : COMPILE_HINT());
 }
@@ -403,8 +418,14 @@ async function renameFile(from, to) {
   await saveNow();
   const bytes = await store.readBinary(fullPath(from));
   // On a case-insensitive disk `a.tex` and `A.tex` are one file, so the old name goes first, with the bytes in hand.
-  if (sameName(path, from)) { await store.remove(fullPath(from)); await writeFile(path, bytes); }
-  else { await writeFile(path, bytes); await store.remove(fullPath(from)); }
+  if (sameName(path, from)) {
+    // A hidden copy holds the bytes until the new name is written.
+    const hold = `.renaming-${Date.now()}`;
+    await writeFile(hold, bytes);
+    await store.remove(fullPath(from));
+    await writeFile(path, bytes);
+    await store.remove(fullPath(hold));
+  } else { await writeFile(path, bytes); await store.remove(fullPath(from)); }
   if (from in state.texts) { state.texts[path] = state.texts[from]; delete state.texts[from]; }
   state.files = await listFiles(store, state.project);
   if (state.settings.main === from) await changeSettings({ main:path });
@@ -529,11 +550,102 @@ async function insertTable() {
   if (needsBooktabs(state.texts[state.settings.main] || '')) say('Add \\usepackage{booktabs} to the preamble for this table.', true);
 }
 
+const projectRoot = () => projectFolder(state.project);
+
+async function renderVersions() {
+  const versions = await listVersions(store, projectRoot());
+  $('versions').replaceChildren(...versions.map(version => {
+    const row = document.createElement('li');
+    row.className = 'version';
+    const name = document.createElement('span');
+    name.textContent = `${version.label} · ${new Date(version.at).toLocaleString()}`;
+    const compare = document.createElement('button');
+    compare.type = 'button'; compare.className = 'btn small'; compare.dataset.command = 'version-changes'; compare.textContent = 'Changes';
+    compare.addEventListener('click', () => changesPdf(version).catch(fail));
+    const restore = document.createElement('button');
+    restore.type = 'button'; restore.className = 'btn small'; restore.dataset.command = 'version-restore'; restore.textContent = 'Restore';
+    restore.addEventListener('click', () => { if (confirm(`Restore "${version.label}"? Your current text is saved as a version first.`)) restoreVersion(version).catch(fail); });
+    row.append(name, compare, restore);
+    return row;
+  }));
+}
+
+async function keepVersion(label) {
+  await saveNow();
+  const version = await saveVersion(store, projectRoot(), state.texts, label);
+  await renderVersions();
+  say(`Saved "${version.label}".`);
+  return version;
+}
+
+async function restoreVersion(version) {
+  await keepVersion(`Before restoring ${version.label}`);
+  const texts = await readVersion(store, projectRoot(), version.id);
+  for (const [path, text] of Object.entries(texts)) { await writeFile(path, text); state.texts[path] = text; }
+  state.files = await listFiles(store, state.project);
+  state.revision += 1;
+  await openFile(state.files.includes(state.path) ? state.path : state.settings.main);
+  showCounts();
+  build();
+}
+
+// Builds a set of files in a scratch folder and answers the compile result. The project's own build stays as it is.
+async function scratchBuild(files, main) {
+  await store.remove(SCRATCH).catch(() => {});
+  for (const { path, data } of files) await store.write(`${SCRATCH}/${path}`, data);
+  say('Compiling a separate copy…');
+  return naklios.experimental_tex.compile({ folder:SCRATCH, main, engine:state.settings.engine || 'pdflatex' });
+}
+
+async function changesPdf(version) {
+  if (!canCompile()) { say(COMPILE_HINT()); return null; }
+  await saveNow();
+  const old = await readVersion(store, projectRoot(), version.id);
+  const files = await Promise.all(state.files.map(async path => ({
+    path,
+    data:/\.(tex|ltx)$/i.test(path) ? markChanges(old[path] ?? '', state.texts[path]) : await store.readBinary(fullPath(path)),
+  })));
+  const result = await scratchBuild(files, state.settings.main);
+  if (!result.pdf) { say('The changes PDF did not build. The marks may clash with a package here.', true); return result; }
+  await pdf.show(await store.readBinary(result.pdf));
+  state.sync = null;
+  say(`Showing changes since "${version.label}". Build to return to the paper.`);
+  return result;
+}
+
+async function arxivPack() {
+  if (!canCompile()) { say(COMPILE_HINT()); return null; }
+  await saveNow();
+  const main = state.settings.main, stem = main.replace(/\.[^.]+$/, '');
+  const { used, missing } = usedFiles({ files:state.files, texts:state.texts, main });
+  if (missing.length) { say(`Missing from the project: ${missing.join(', ')}`, true); return { missing }; }
+  let removed = 0;
+  const files = await Promise.all(used.map(async path => {
+    if (!/\.(tex|ltx)$/i.test(path)) return { path, data:await store.readBinary(fullPath(path)) };
+    const stripped = stripComments(state.texts[path]);
+    removed += stripped.removed;
+    return { path, data:stripped.text };
+  }));
+  const bbl = `${projectRoot()}/.tex-build/${stem.replace(/^.*\//, '')}.bbl`;
+  if (await store.exists(bbl)) files.push({ path:`${stem}.bbl`, data:await store.readBinary(bbl) });
+  const result = await scratchBuild(files, main);
+  if (!result.ok) { say('The arXiv pack did not build on its own, so nothing was saved. See the problems list.', true); state.problems = visibleDiagnostics(result.diagnostics).map(item => ({ ...item, ...explain(item) })); renderProblems(); return result; }
+  const zipped = makeZip(files.map(({ path, data }) => ({ path, bytes:typeof data === 'string' ? new TextEncoder().encode(data) : data })));
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(new Blob([zipped], { type:'application/zip' }));
+  link.download = `${safeName(state.project)}-arxiv.zip`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 10000);
+  say(`arXiv pack saved: ${files.length} files, ${removed} comments removed, and it builds on its own.`);
+  return { ok:true, files:files.map(file => file.path), removed };
+}
+
 function bindPage() {
   for (const [id, template] of Object.entries(TEMPLATES)) $('template').append(new Option(template.label, id));
+  loadVenues().then(list => { venues = list; for (const [id, venue] of Object.entries(list)) $('template').append(new Option(venue.label, id)); }).catch(error => console.error('Templates failed to load', error));
   $('new-project').addEventListener('submit', event => {
     event.preventDefault();
-    createProject(store, $('project-title').value, $('template').value).then(openProject).catch(fail);
+    createProject(store, $('project-title').value, $('template').value, venues).then(openProject).catch(fail);
   });
   $('home').addEventListener('click', () => saveNow().then(() => { stopWatching?.(); stopWatching = null; state.project = null; state.path = null; return chooseStore(); }).then(renderHome).catch(fail));
   $('build').addEventListener('click', () => saveNow().then(build).catch(fail));
@@ -554,6 +666,8 @@ function bindPage() {
   });
   $('add-files').addEventListener('change', event => { addFiles([...event.target.files]).catch(fail); event.target.value = ''; });
   $('export').addEventListener('click', () => exportProject().catch(fail));
+  $('arxiv').addEventListener('click', () => arxivPack().catch(fail));
+  $('save-version').addEventListener('click', () => { const label = prompt('Name this version', 'Draft'); if (label) keepVersion(label).catch(fail); });
   $('import-zip').addEventListener('change', event => { const [file] = event.target.files; event.target.value = ''; if (file) importProject(file).catch(fail); });
   $('search-query').addEventListener('input', runSearch);
   $('search-regex').addEventListener('change', runSearch);
@@ -587,7 +701,7 @@ function bindPage() {
 const commands = {
   'projects.list':() => listProjects(store),
   'project.open':({ name }) => openProject(name).then(() => ({ opened:name })),
-  'project.create':({ name, template }) => createProject(store, name, template).then(openProject).then(() => ({ opened:state.project })),
+  'project.create':({ name, template }) => createProject(store, name, template, venues).then(openProject).then(() => ({ opened:state.project })),
   'files.list':() => state.files,
   'file.read':({ path }) => state.texts[path] ?? store.read(fullPath(path)),
   async 'file.write'({ path, text }) {
@@ -601,8 +715,9 @@ const commands = {
   },
   async 'build.run'() {
     if (!canCompile()) throw new Error('Compiling needs the NakliOS TeX service.');
+    const revision = state.revision;
     const result = await compile();
-    await afterBuild({ result, stale:false });
+    await afterBuild({ result, stale:revision !== state.revision, revision });
     $('build').hidden = false; $('cancel').hidden = true;
     return { ok:result.ok, problems:state.problems.map(({ severity, file, line, headline, explanation }) => ({ severity, file, line, headline, explanation })) };
   },
@@ -611,7 +726,11 @@ const commands = {
   'search.todos':() => findTodos(state.texts),
   async 'search.replace'({ query, replacement, regex, matchCase }) { return { replaced:await replaceEverywhere(query, replacement, { regex, matchCase }) }; },
   'pdf.locate':({ path, line }) => (syncReady() ? forward(state.sync, path, line) : null),
-  'pdf.source':({ page, x, y }) => (syncReady() ? inverse(state.sync, page, x, y) : null),
+  'pdf.source':({ page, x, y }) => (syncReady() ? inverse(state.sync, page, x, y, new Set(state.files)) : null),
+  'versions.list':() => listVersions(store, projectRoot()),
+  'versions.save':({ label }) => keepVersion(label),
+  async 'versions.changes'({ id }) { const version = (await listVersions(store, projectRoot())).find(item => item.id === id); return changesPdf(version); },
+  'arxiv.pack':() => arxivPack(),
   'problems.list':() => state.problems.map(({ severity, file, line, headline, explanation, suggestion }) => ({ severity, file, line, headline, explanation, suggestion })),
 };
 
