@@ -1,0 +1,6 @@
+/*
+  Content-Security-Policy: frame-ancestors 'self' https://naklios.dev http://localhost:* http://127.0.0.1:*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+/decks/*
+  Cache-Control: public, max-age=86400
