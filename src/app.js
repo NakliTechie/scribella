@@ -16,7 +16,7 @@ import { listVersions, readVersion, saveVersion } from './versions.js';
 import { markChanges } from './changes.js';
 import { stripComments, usedFiles } from './arxiv.js';
 import { HIGHLIGHTS, INTENTS, NOTES_PATH, locate, makeAnchor, parseNotes } from './annotations.js';
-import { parseBib, scanEntries, writeEntry } from './bib.js';
+import { addFields, parseBib, sameWork, scanEntries, writeEntry } from './bib.js';
 import { auditEntry, findPaper } from './lookup.js';
 import { checkPdf, checkSource } from './blind.js';
 import { MAX_PASSAGE, buildMessages, parseReply, safeResult, wordEdits } from './revise.js';
@@ -590,11 +590,16 @@ async function setText(path, text) {
 
 async function addPaper(input) {
   say('Looking up the paper…');
+  const project = state.project;
   const entry = await findPaper(input);
+  if (state.project !== project) return null;
   if (!entry) { say('No record found for that.', true); return null; }
   const file = bibFiles()[0] || 'references.bib', existing = bibEntries();
-  const same = existing.find(item => item.key === entry.key || (entry.fields.doi && item.fields.doi?.toLowerCase() === entry.fields.doi.toLowerCase()));
+  const same = existing.find(item => (entry.fields.doi && item.fields.doi?.toLowerCase() === entry.fields.doi.toLowerCase()) || sameWork(item.fields, entry.fields));
   if (same) { say(`Already in the bibliography as ${same.key}.`); return same; }
+  // Two papers can share a first author, year and title word, so a taken key gets a letter.
+  const base = entry.key;
+  for (let letter = 98; existing.some(item => item.key === entry.key); letter += 1) entry.key = `${base}${String.fromCharCode(letter)}`;
   await setText(file, `${(state.texts[file] || '').trimEnd()}\n\n${writeEntry(entry)}`.trimStart());
   say(`Added ${entry.key} to ${file}.`);
   return entry;
@@ -642,13 +647,15 @@ async function auditReferences() {
   if (!entries.length) { say('This project has no bibliography entries.'); return []; }
   const local = bibFiles().flatMap(file => scanEntries(parseBib(state.texts[file])).map(item => ({ title:item.message, detail:item.key ? `${file}: ${item.key}` : file, status:'warn' })));
   say(`Checking ${entries.length} references…`);
+  const project = state.project;
   const results = await eachLimited(entries, entry => auditEntry(entry));
+  if (state.project !== project) return [];
   review.notices = Object.fromEntries(results.filter(item => item.notices?.length).map(item => [item.key, item.notices]));
   const labels = { checked:'Matches the record', update:'A record adds details', conflict:'Differs from the record', unmatched:'No record found', unavailable:'Could not check', skipped:'Skipped' };
   const rows = results.map((result, index) => {
     const notice = result.notices?.length ? `Notice: ${result.notices.join(', ')}. ` : '';
     const row = { title:`${result.key}: ${labels[result.status]}`, detail:`${notice}${result.message || ''}`, status:result.notices?.length ? 'bad' : result.status };
-    if (result.replacement) Object.assign(row, { fixLabel:'Add the details', fix:() => replaceEntry(entries[index], result.replacement) });
+    if (result.additions) Object.assign(row, { fixLabel:'Add the details', fix:() => addEntryDetails(project, entries[index], result.additions) });
     return row;
   });
   const seen = results.filter(item => item.status === 'checked' || item.status === 'update').length;
@@ -657,16 +664,16 @@ async function auditReferences() {
   return results;
 }
 
-async function replaceEntry(entry, replacement) {
-  const text = state.texts[entry.file];
-  if (!parseBib(text).entries.some(item => item.key === entry.key && item.from === entry.from && item.to === entry.to)) throw new Error('This entry moved. Run the check again.');
-  await setText(entry.file, text.slice(0, entry.from) + writeEntry(replacement).trimEnd() + text.slice(entry.to));
+async function addEntryDetails(project, entry, additions) {
+  if (state.project !== project) throw new Error('This check belongs to another project.');
+  await setText(entry.file, addFields(state.texts[entry.file], entry, additions));
 }
 
 async function submissionCheck() {
   await saveNow();
   const source = checkSource(state.texts).map(item => ({ title:item.message, detail:`${item.file}:${item.line}`, status:'warn', go:() => jump(item.file, item.line) }));
-  const facts = await pdf.inspect();
+  // Only a PDF built from the current text, and not the changes PDF, says anything about this submission.
+  const facts = state.builtRevision === state.revision ? await pdf.inspect() : null;
   const fromPdf = facts ? checkPdf(facts).map(item => ({ title:item.message, detail:item.page ? `PDF page ${item.page}` : 'PDF', status:'warn' })) : [];
   const rows = [...source, ...fromPdf];
   showChecks(`Double-blind check: ${rows.length} ${rows.length === 1 ? 'finding' : 'findings'}${facts ? '' : ' (source only: build first to include the PDF)'}`, rows);
@@ -913,6 +920,7 @@ async function changesPdf(version) {
   if (!result.ok || !result.pdf) { say('The changes PDF did not build. The marks may clash with a package here.', true); return result; }
   await pdf.show(await store.readBinary(result.pdf));
   state.sync = null;
+  state.builtRevision = null;
   say(`Showing changes since "${version.label}". Build to return to the paper.`);
   return result;
 }

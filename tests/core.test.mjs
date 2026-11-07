@@ -16,7 +16,7 @@ import { readFileSync } from 'node:fs';
 import { keepsProtected, protectedSpans } from '../src/protected.js';
 import { locate, makeAnchor, parseNotes } from '../src/annotations.js';
 import { applyEdits, buildMessages, parseReply, safeResult, wordEdits } from '../src/revise.js';
-import { citeKey, parseBib, sameWork, scanEntries, writeEntry } from '../src/bib.js';
+import { addFields, citeKey, cleanValue, parseBib, sameWork, scanEntries, writeEntry } from '../src/bib.js';
 import { auditEntry, findPaper, fromCrossref, noticesOf } from '../src/lookup.js';
 import { checkPdf, checkSource } from '../src/blind.js';
 import { cleanFilePath, loadVenues, createProject, findMain, listFiles, listProjects, readSettings } from '../src/project.js';
@@ -398,7 +398,7 @@ test('the audit never counts a failure as checked, and refuses a different paper
   const result = await auditEntry(entry, answer({ message:WORK }));
   assert.equal(result.status, 'update');
   assert.deepEqual(result.notices, ['retracted']);
-  assert.equal(result.replacement.fields.pages, '1-2');
+  assert.equal(result.additions.pages, '1-2');
   assert.equal((await auditEntry(entry, async () => { throw new Error('offline'); })).status, 'unavailable');
   assert.equal((await auditEntry(entry, async () => new Response('', { status:500 }))).status, 'unavailable');
   assert.equal((await auditEntry(entry, async () => new Response('', { status:404 }))).status, 'unmatched');
@@ -419,7 +419,7 @@ test('findPaper routes DOIs, arXiv ids and titles', async () => {
 
 test('the double-blind check reads source and PDF facts', () => {
   const found = checkSource({ 'a.tex':'\\usepackage[final]{neurips_2026}\n\\author{A\\thanks{x}}\n\\url{https://github.com/me}\n% \\thanks{hidden}\nIn our previous work we did this.\n\\section*{Acknowledgements}\n' });
-  assert.equal(found.length, 5);
+  assert.equal(found.length, 6);
   const pdfFound = checkPdf({ author:'Me', links:[{ page:2, url:'https://github.com/me/repo' }, { page:2, url:'https://arxiv.org/abs/1' }], fonts:[{ page:1, name:'F', type3:true, embedded:true }, { page:1, name:'G', type3:false, embedded:false }] });
   assert.equal(pdfFound.length, 4);
 });
@@ -446,4 +446,18 @@ test('an anchor at its old offset still needs its context', () => {
 test('comment markers inside verbatim stay', () => {
   const source = '\\begin{verbatim}\n\\begin{comment}\n\\end{verbatim}';
   assert.equal(stripComments(source).text, source);
+});
+
+test('outside values are made safe, and details are added without rewriting the entry', () => {
+  assert.equal(cleanValue('<i>R&D</i> at 100% \\input{x}'), 'R\\&D at 100\\% inputx');
+  const text = '@article{k, title = "A " # b, note = {keep}}\n';
+  const [entry] = parseBib(text).entries;
+  const next = addFields(text, entry, { doi:'10.1/x' });
+  assert.ok(next.startsWith('@article{k, title = "A " # b, note = {keep},\n  doi = {10.1/x}\n}'));
+  assert.throws(() => addFields(`x${text}`, entry, { doi:'y' }), /changed/);
+});
+
+test('the double-blind check sees authors and emails, and spares anonymous ones', () => {
+  assert.equal(checkSource({ 'a.tex':'\\author{Anonymous}\n' }).length, 0);
+  assert.equal(checkSource({ 'a.tex':'\\author{Ada Lovelace}\nme@uni.edu\n' }).length, 2);
 });

@@ -1,6 +1,6 @@
 // Paper metadata from Crossref and OpenAlex, which both answer browsers directly. A failed lookup is "unavailable" and
 // never counts as a check that passed.
-import { citeKey, plainTitle, sameWork } from './bib.js';
+import { citeKey, cleanValue, plainTitle, sameWork } from './bib.js';
 
 const TIMEOUT_MS = 8000;
 const CROSSREF = 'https://api.crossref.org/works';
@@ -23,10 +23,10 @@ export function fromCrossref(work) {
   const venue = work['container-title']?.[0];
   const type = TYPES[work.type] || 'misc';
   const fields = {
-    title:work.title?.[0] || '',
-    author:(work.author || []).map(person => [person.family, person.given].filter(Boolean).join(', ')).join(' and '),
-    [type === 'inproceedings' || type === 'incollection' ? 'booktitle' : 'journal']:venue,
-    year:year ? String(year) : '', volume:work.volume, number:work.issue, pages:work.page, publisher:work.publisher, doi:work.DOI,
+    title:cleanValue(work.title?.[0]),
+    author:(work.author || []).map(person => cleanValue([person.family, person.given].filter(Boolean).join(', '))).join(' and '),
+    [type === 'inproceedings' || type === 'incollection' ? 'booktitle' : 'journal']:cleanValue(venue),
+    year:year ? String(year) : '', volume:cleanValue(work.volume), number:cleanValue(work.issue), pages:cleanValue(work.page), publisher:cleanValue(work.publisher), doi:cleanValue(work.DOI),
   };
   if (type === 'book' || type === 'misc') delete fields.journal;
   return { type, key:citeKey(fields), fields };
@@ -34,13 +34,13 @@ export function fromCrossref(work) {
 
 export function fromOpenAlex(work) {
   const fields = {
-    title:work.title || '',
+    title:cleanValue(work.title),
     author:(work.authorships || []).map(item => {
-      const parts = (item.author?.display_name || '').trim().split(/\s+/);
+      const parts = cleanValue(item.author?.display_name).split(/\s+/);
       return `${parts.pop()}, ${parts.join(' ')}`.replace(/, $/, '');
     }).join(' and '),
     year:work.publication_year ? String(work.publication_year) : '',
-    doi:work.doi?.replace(/^https:\/\/doi\.org\//, ''),
+    doi:cleanValue(work.doi?.replace(/^https:\/\/doi\.org\//, '')),
   };
   return { type:'misc', key:citeKey(fields), fields };
 }
@@ -95,7 +95,7 @@ export async function auditEntry(entry, load = fetch) {
     if (!same) return { key:entry.key, status:'conflict', notices, message:`The record found differs: "${found.fields.title}".` };
     const missing = ['doi', 'pages', 'volume', 'year'].filter(name => found.fields[name] && !fields[name]);
     return missing.length
-      ? { key:entry.key, status:'update', notices, message:`The record adds ${missing.join(', ')}.`, replacement:{ ...entry, fields:{ ...fields, ...Object.fromEntries(missing.map(name => [name, found.fields[name]])) } } }
+      ? { key:entry.key, status:'update', notices, message:`The record adds ${missing.join(', ')}.`, additions:Object.fromEntries(missing.map(name => [name, found.fields[name]])) }
       : { key:entry.key, status:'checked', notices };
   } catch (error) {
     return { key:entry.key, status:'unavailable', message:error.message };

@@ -51,13 +51,26 @@ export function parseBib(text) {
     const open = match.index + match[0].length - 1, end = closing(text, open);
     if (end < 0) { problems.push({ message:`An entry near offset ${match.index} is not closed.` }); continue; }
     const body = text.slice(open + 1, end), comma = body.indexOf(',');
-    entries.push({ type, key:(comma < 0 ? body : body.slice(0, comma)).trim(), fields:parseFields(comma < 0 ? '' : body.slice(comma + 1)), from:match.index, to:end + 1 });
+    entries.push({ type, key:(comma < 0 ? body : body.slice(0, comma)).trim(), fields:parseFields(comma < 0 ? '' : body.slice(comma + 1)), from:match.index, to:end + 1, raw:text.slice(match.index, end + 1) });
   }
   return { entries, problems };
 }
 
 export function writeEntry({ type, key, fields }) {
   return `@${type}{${key},\n${Object.entries(fields).filter(([, value]) => value).map(([name, value]) => `  ${name} = {${value}}`).join(',\n')}\n}\n`;
+}
+
+// Adds fields to one entry and leaves everything already written in it as it was.
+export function addFields(text, entry, fields) {
+  if (text.slice(entry.from, entry.to) !== entry.raw) throw new Error('This entry changed. Run the check again.');
+  const body = entry.raw.slice(0, -1).trimEnd().replace(/,$/, '');
+  const added = Object.entries(fields).map(([name, value]) => `,\n  ${name} = {${value}}`).join('');
+  return `${text.slice(0, entry.from)}${body}${added}\n}${text.slice(entry.to)}`;
+}
+
+// A value from an outside record, made safe to put between braces: no markup, no commands, specials escaped.
+export function cleanValue(value) {
+  return String(value ?? '').replace(/<[^>]+>/g, '').replace(/[\\{}]/g, '').replace(/[~^]/g, ' ').replace(/[&%$#_]/g, '\\$&').replace(/\s+/g, ' ').trim();
 }
 
 export function scanEntries({ entries, problems }) {

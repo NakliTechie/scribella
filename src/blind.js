@@ -16,6 +16,10 @@ export function checkSource(texts) {
       if (/\\(?:section|paragraph)\*?\{Acknowledge?ments?\}|\\begin\{ack\}|\\acknowledgments?\b/i.test(line)) add('Acknowledgements can identify you. Most double-blind venues want them out.');
       if (/\\thanks\{/.test(line)) add('\\thanks can identify you.');
       if (ACCOUNT.test(line)) add('This link points to an account page.');
+      const author = /\\author\{(.*)/.exec(line);
+      if (author && !/anonymous|author names? withheld|^\s*\}?\s*$/i.test(author[1])) add('\\author names someone. Double-blind papers keep this anonymous.');
+      if (/\\(?:affiliation|institute|affil)\b/.test(line)) add('An affiliation can identify you.');
+      if (/[\w.+-]+@[\w-]+\.[\w.-]+/.test(line)) add('An email address can identify you.');
       if (SELF.test(line)) add('This phrase reveals that the cited work is yours.');
     });
   }
