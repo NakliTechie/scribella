@@ -78,7 +78,16 @@ export function citeAt(text, pos) {
   return null;
 }
 
-export function createEditor(parent, { onChange, onSave, onDrop, onShow, onSelect = () => {}, describeCite = () => '', project, path, keys = 'default' }) {
+export function refAt(text, pos) {
+  const line = text.lastIndexOf('\n', pos - 1) + 1, end = text.indexOf('\n', pos);
+  for (const match of text.slice(line, end < 0 ? text.length : end).matchAll(/\\(?:eq|auto|c|C|page|name)?ref\*?\{([^}]*)\}/g)) {
+    const from = line + match.index + match[0].indexOf('{') + 1, to = from + match[1].length;
+    if (pos >= from && pos <= to) return { from, to, key:match[1] };
+  }
+  return null;
+}
+
+export function createEditor(parent, { onChange, onSave, onDrop, onShow, onSelect = () => {}, describeCite = () => '', describeRef = () => '', project, path, keys = 'default' }) {
   let quiet = false;
   const keyMode = new Compartment();
   const keysFor = mode => (mode === 'vim' ? vim() : mode === 'emacs' ? emacs() : []);
@@ -91,7 +100,8 @@ export function createEditor(parent, { onChange, onSave, onDrop, onShow, onSelec
         basicSetup,
         mathHover,
         hoverTooltip((current, pos) => {
-          const cite = citeAt(current.state.doc.toString(), pos), text = cite && describeCite(cite.key);
+          const source = current.state.doc.toString();
+          const ref = refAt(source, pos), cite = ref || citeAt(source, pos), text = ref ? describeRef(ref.key) : cite && describeCite(cite.key);
           if (!text) return null;
           return { pos:cite.from, end:cite.to, above:true, create() {
             const dom = document.createElement('div');

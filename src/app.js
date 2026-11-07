@@ -19,6 +19,8 @@ import { HIGHLIGHTS, INTENTS, NOTES_PATH, locate, makeAnchor, parseNotes } from 
 import { addFields, parseBib, sameWork, scanEntries, writeEntry } from './bib.js';
 import { auditEntry, findPaper } from './lookup.js';
 import { checkPdf, checkSource } from './blind.js';
+import { formatLatex } from './format.js';
+import { parseBlg, parseLabels } from './aux.js';
 import { MAX_PASSAGE, buildMessages, parseReply, safeResult, wordEdits } from './revise.js';
 
 const AUTOSAVE_MS = 1200;
@@ -65,6 +67,10 @@ const editor = createEditor($('editor'), {
   project:projectIndex,
   keys:readKeys(),
   onShow:() => showInPdf(),
+  describeRef:key => {
+    const label = state.labels?.get(key);
+    return label ? `${key}: ${label.number || 'no number'}, page ${label.page}` : `${key}: not built yet`;
+  },
   describeCite:key => {
     const entry = bibEntries().find(item => item.key === key);
     if (!entry) return `${key}: not in the bibliography`;
@@ -226,7 +232,10 @@ async function afterBuild({ result, stale, revision = state.revision }) {
   const log = result.log ? await store.read(result.log).catch(() => '') : '';
   state.log = log;
   state.problems = visibleDiagnostics(result.diagnostics).map(item => ({ ...item, ...explain(item, { log, source:state.texts[item.file] || '' }) }));
+  if (result.aux) state.labels = parseLabels(await store.read(result.aux).catch(() => ''));
+  if (result.blg) state.problems.push(...parseBlg(await store.read(result.blg).catch(() => '')).map(item => ({ ...item, file:'', headline:item.message, explanation:'' })));
   renderProblems();
+  completeStep('build');
   if (result.pdf && result.ok) {
     await pdf.show(await store.readBinary(result.pdf));
     state.sync = result.synctex ? await readSynctex(await store.readBinary(result.synctex)).catch(() => null) : null;
@@ -485,6 +494,50 @@ async function dropFiles(files, at) {
   if (others.length) await addFiles(others);
 }
 
+async function formatFile() {
+  if (!editingText() || !/\.(tex|ltx)$/i.test(state.path)) throw new Error('Open a LaTeX file first.');
+  const next = formatLatex(editor.text);
+  if (next !== editor.text) editor.replaceRange(0, editor.text.length, next);
+  say('Formatted.');
+}
+
+async function checkSetup() {
+  const rows = [];
+  const add = (title, detail, status) => rows.push({ title, detail, status });
+  add(storeKind === 'host' ? 'Storage: NakliOS' : 'Storage: this browser only', storeKind === 'host' ? 'Projects can compile.' : 'Compiling needs a NakliOS Folder or Crate.', storeKind === 'host' ? 'checked' : 'warn');
+  if (canCompile()) {
+    const cache = await naklios.experimental_tex.cache();
+    const ready = cache.packs.filter(pack => pack.cached).length;
+    add(`TeX Live packs: ${ready} of ${cache.packs.length} in this browser`, ready === cache.packs.length ? 'Compiles need no download.' : 'The next compile downloads about 680 MB.', ready === cache.packs.length ? 'checked' : 'warn');
+  } else add('TeX: not available here', COMPILE_HINT(), 'warn');
+  add(aiReady() ? 'AI: available' : 'AI: not set up', aiReady() ? 'Proofread, Polish and revision rounds can run.' : 'Everything except revision works without it.', aiReady() ? 'checked' : 'warn');
+  showChecks('Setup', rows);
+  return rows.map(({ title, detail }) => ({ title, detail }));
+}
+
+const STEPS = [['build', 'Build the paper'], ['paper', 'Add a paper'], ['note', 'Add a note'], ['version', 'Save a version']];
+const STEPS_ITEM = 'scribella.steps';
+const doneSteps = () => { try { return new Set(JSON.parse(localStorage.getItem(STEPS_ITEM)) || []); } catch (_) { return new Set(); } };
+
+function renderSteps() {
+  const done = doneSteps();
+  $('steps').hidden = STEPS.every(([id]) => done.has(id));
+  $('steps').replaceChildren(...STEPS.map(([id, label]) => {
+    const item = document.createElement('span');
+    item.textContent = `${done.has(id) ? '✓' : '○'} ${label}`;
+    item.className = done.has(id) ? 'step done' : 'step';
+    return item;
+  }));
+}
+
+function completeStep(id) {
+  const done = doneSteps();
+  if (done.has(id)) return;
+  done.add(id);
+  try { localStorage.setItem(STEPS_ITEM, JSON.stringify([...done])); } catch (_) {}
+  renderSteps();
+}
+
 async function exportProject() {
   await saveNow();
   const files = await Promise.all(state.files.map(async path => ({ path, bytes:await store.readBinary(fullPath(path)) })));
@@ -602,6 +655,7 @@ async function addPaper(input) {
   for (let letter = 98; existing.some(item => item.key === entry.key); letter += 1) entry.key = `${base}${String.fromCharCode(letter)}`;
   await setText(file, `${(state.texts[file] || '').trimEnd()}\n\n${writeEntry(entry)}`.trimStart());
   say(`Added ${entry.key} to ${file}.`);
+  completeStep('paper');
   return entry;
 }
 
@@ -738,6 +792,7 @@ async function addNote({ body = '', intent = '', color = 'note', file = state.pa
   review.notes.unshift(note);
   await saveNotes();
   renderNotes();
+  completeStep('note');
   return note;
 }
 
@@ -878,6 +933,7 @@ async function keepVersion(label) {
   const version = await saveVersion(store, projectRoot(), state.texts, label);
   await renderVersions();
   say(`Saved "${version.label}".`);
+  completeStep('version');
   return version;
 }
 
@@ -993,6 +1049,9 @@ function bindPage() {
     for (const [, other] of tabs) $(other).hidden = other !== pane;
     for (const [other] of tabs) $(other).setAttribute('aria-pressed', String(other === tab));
   });
+  $('check-setup').addEventListener('click', () => checkSetup().catch(fail));
+  $('format').addEventListener('click', () => formatFile().catch(fail));
+  renderSteps();
   $('check-references').addEventListener('click', () => auditReferences().catch(fail));
   $('check-blind').addEventListener('click', () => submissionCheck().catch(fail));
   $('add-paper').addEventListener('click', () => { const input = prompt('arXiv id, DOI or exact title'); if (input) addPaper(input).catch(fail); });
@@ -1074,6 +1133,8 @@ const commands = {
   'versions.save':({ label }) => keepVersion(label),
   async 'versions.changes'({ id }) { const version = (await listVersions(store, projectRoot())).find(item => item.id === id); return changesPdf(version); },
   'arxiv.pack':() => arxivPack(),
+  'file.format':() => formatFile().then(() => ({ formatted:state.path })),
+  'setup.check':() => checkSetup(),
   'references.add':({ query }) => addPaper(query).then(entry => entry && { key:entry.key }),
   'references.check':() => auditReferences().then(results => results.map(({ key, status, notices, message }) => ({ key, status, notices, message }))),
   'submission.check':() => submissionCheck().then(rows => rows.map(({ title, detail }) => ({ title, detail }))),

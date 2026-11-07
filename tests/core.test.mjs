@@ -19,6 +19,8 @@ import { applyEdits, buildMessages, parseReply, safeResult, wordEdits } from '..
 import { addFields, citeKey, cleanValue, parseBib, sameWork, scanEntries, writeEntry } from '../src/bib.js';
 import { auditEntry, findPaper, fromCrossref, noticesOf } from '../src/lookup.js';
 import { checkPdf, checkSource } from '../src/blind.js';
+import { formatLatex } from '../src/format.js';
+import { parseBlg, parseLabels } from '../src/aux.js';
 import { cleanFilePath, loadVenues, createProject, findMain, listFiles, listProjects, readSettings } from '../src/project.js';
 
 test('an unknown command gets a one-click fix when it is a near typo', () => {
@@ -460,4 +462,14 @@ test('outside values are made safe, and details are added without rewriting the 
 test('the double-blind check sees authors and emails, and spares anonymous ones', () => {
   assert.equal(checkSource({ 'a.tex':'\\author{Anonymous}\n' }).length, 0);
   assert.equal(checkSource({ 'a.tex':'\\author{Ada Lovelace}\nme@uni.edu\n' }).length, 2);
+});
+
+test('formatting changes only indentation, and leaves verbatim alone', () => {
+  const source = '\\begin{document}\n\\begin{itemize}\n\\item a   \n\\begin{verbatim}\n   raw\n\\end{verbatim}\n\\end{itemize}\n\\end{document}';
+  assert.equal(formatLatex(source), '\\begin{document}\n\\begin{itemize}\n  \\item a\n  \\begin{verbatim}\n   raw\n\\end{verbatim}\n\\end{itemize}\n\\end{document}');
+});
+
+test('the .aux gives label numbers, and the bibliography log gives problems', () => {
+  assert.deepEqual(parseLabels('\\newlabel{sec:a}{{2.1}{3}{Title}{section.2}{}}').get('sec:a'), { number:'2.1', page:'3' });
+  assert.deepEqual(parseBlg('Warning--empty journal in x\nI found no database files\n').map(item => item.severity), ['warning', 'error']);
 });
