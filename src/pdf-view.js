@@ -8,7 +8,7 @@ const WIDTH_MARGIN = 24;
 
 export function createPdfView(scroller, { onPages = () => {} } = {}) {
   let doc = null, loading = null, zoom = 1, generation = 0;
-  const shown = new Map(), queued = new Set();
+  let watcher = null;
 
   function anchor() {
     const pages = [...scroller.children];
@@ -38,20 +38,9 @@ export function createPdfView(scroller, { onPages = () => {} } = {}) {
     if (run === generation) holder.replaceChildren(canvas);
   }
 
-  const watcher = new IntersectionObserver(entries => {
-    for (const entry of entries) {
-      const number = Number(entry.target.dataset.page);
-      if (!entry.isIntersecting || shown.has(number) || queued.has(number)) continue;
-      queued.add(number);
-      const run = generation;
-      paint(entry.target, number, run).then(() => { if (run === generation) shown.set(number, true); }, error => console.error('PDF page failed', error)).finally(() => queued.delete(number));
-    }
-  }, { root:scroller, rootMargin:'600px 0px' });
-
   async function layout(place) {
     const run = ++generation;
-    shown.clear(); queued.clear();
-    watcher.disconnect();
+    watcher?.disconnect();
     const holders = [];
     for (let number = 1; number <= doc.numPages; number += 1) {
       const page = await doc.getPage(number);
@@ -67,7 +56,15 @@ export function createPdfView(scroller, { onPages = () => {} } = {}) {
     }
     scroller.replaceChildren(...holders);
     restore(place);
-    holders.forEach(holder => watcher.observe(holder));
+    // One observer per layout, so a late callback from an old layout cannot claim a page of this one.
+    const current = watcher = new IntersectionObserver(entries => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        current.unobserve(entry.target);
+        paint(entry.target, Number(entry.target.dataset.page), run).catch(error => console.error('PDF page failed', error));
+      }
+    }, { root:scroller, rootMargin:'600px 0px' });
+    holders.forEach(holder => current.observe(holder));
     onPages(doc.numPages);
   }
 
@@ -91,7 +88,7 @@ export function createPdfView(scroller, { onPages = () => {} } = {}) {
     },
     clear() {
       generation += 1;
-      watcher.disconnect();
+      watcher?.disconnect();
       loading?.destroy();
       doc = loading = null;
       scroller.replaceChildren();
