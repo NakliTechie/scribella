@@ -1,7 +1,7 @@
-// Projects are folders under `projects/`. Build output and hidden files stay out of the tree, and `.paginella.json`
+// Projects are folders under `projects/`. Build output and hidden files stay out of the tree, and `.scribella.json`
 // holds the settings a project carries with it.
 const ROOT = 'projects';
-const SETTINGS = '.paginella.json';
+const SETTINGS = '.scribella.json';
 const TEXT = /\.(tex|ltx|bib|sty|cls|bst|bbx|cbx|txt|md|csv|tsv)$/i;
 
 export const isText = path => TEXT.test(path);

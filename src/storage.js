@@ -19,7 +19,7 @@ export function hostStore(fs) {
 }
 
 // A same-origin mirror shares this storage with the host, so everything sits in one folder of its own.
-export function browserStore(root = navigator.storage.getDirectory().then(top => top.getDirectoryHandle('paginella', { create:true }))) {
+export function browserStore(root = navigator.storage.getDirectory().then(top => top.getDirectoryHandle('scribella', { create:true }))) {
   async function folderOf(parts, create) {
     let folder = await root;
     for (const part of parts) folder = await folder.getDirectoryHandle(part, { create });

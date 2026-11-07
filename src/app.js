@@ -1,4 +1,4 @@
-// Paginella's page: wires storage, the editor, builds and the PDF pane. Writing works everywhere; compiling needs the
+// Scribella's page: wires storage, the editor, builds and the PDF pane. Writing works everywhere; compiling needs the
 // NakliOS TeX service, because the engine lives there.
 import { browserStore, hostStore } from './storage.js';
 import { TEMPLATES, createProject, findMain, isText, listFiles, listProjects, projectFolder, readSettings, writeSettings } from './project.js';
@@ -16,7 +16,7 @@ const hosted = () => !!(naklios?.capabilities?.hosted && naklios.capabilities.fs
 const canCompile = () => storeKind === 'host' && naklios.capabilities.experimental_tex === true;
 const COMPILE_HINT = () => (naklios?.capabilities?.hosted
   ? 'Writing works here. To compile, connect a Folder or Crate in NakliOS Settings.'
-  : 'Writing works here. To compile, open Paginella inside NakliOS, where the TeX engine runs.');
+  : 'Writing works here. To compile, open Scribella inside NakliOS, where the TeX engine runs.');
 
 let store = null, storeKind = null;
 const state = { project:null, settings:{}, files:[], texts:{}, path:null, dirty:false, revision:0, problems:[], log:'', job:null, auto:true };
@@ -228,8 +228,8 @@ async function openProject(name) {
   renderProblems();
   document.body.dataset.view = 'project';
   $('project-name').textContent = name;
-  naklios?.title?.(`${name} — Paginella`);
-  document.title = `${name} — Paginella`;
+  naklios?.title?.(`${name} — Scribella`);
+  document.title = `${name} — Scribella`;
   await openFile(state.settings.main || state.files[0]);
   showCounts();
   const last = state.settings.main && `${projectFolder(name)}/.tex-build/${state.settings.main.replace(/^.*\//, '').replace(/\.[^.]+$/, '')}.pdf`;
@@ -338,7 +338,7 @@ const commands = {
 
 async function registerCommands() {
   const manifest = await (await fetch('./commands.json')).json();
-  naklios?.experimental_commands?.register?.(manifest.commands.map(command => ({ ...command, name:`paginella.${command.name}`, handler:commands[command.name] })));
+  naklios?.experimental_commands?.register?.(manifest.commands.map(command => ({ ...command, name:`scribella.${command.name}`, handler:commands[command.name] })));
 }
 
 // TeX reads NakliOS storage, so a project must live there to compile. The host's capabilities can arrive after the page
@@ -353,7 +353,7 @@ async function chooseStore() {
 
 async function start() {
   bindPage();
-  window.paginella = { commands, state };
+  window.scribella = { commands, state };
   naklios?.ready?.();
   await chooseStore();
   naklios?.onCapabilitiesChange?.(() => { chooseStore().catch(fail); });

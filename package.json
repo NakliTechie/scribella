@@ -1,5 +1,5 @@
 {
-  "name": "paginella",
+  "name": "scribella",
   "version": "0.1.0",
   "private": true,
   "description": "Write LaTeX papers in the browser, with TeX running on your own machine.",

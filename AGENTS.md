@@ -1,4 +1,4 @@
-# Agent notes for Paginella
+# Agent notes for Scribella
 
 Tier: **Product**, set on 2026-11-07 by the owner's "Yes" to full parity with Lattice, because the Overleaf link and the paper lookups need network routes. Projects stay on the person's disk. No account, no telemetry.
 

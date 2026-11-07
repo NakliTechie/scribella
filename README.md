@@ -1,12 +1,12 @@
-# Paginella
+# Scribella
 
 Write LaTeX papers in the browser. Your files stay on your machine, and TeX runs on your machine too.
 
 ## Use it
 
-Open Paginella from the NakliOS desktop at [naklios.dev](https://naklios.dev). The first compile downloads TeX Live once, about 680 MB.
+Open Scribella from the NakliOS desktop at [naklios.dev](https://naklios.dev). The first compile downloads TeX Live once, about 680 MB.
 
-The direct site at `paginella.naklitechie.com` offers writing only, because the TeX engine lives in NakliOS.
+The direct site at `scribella.naklitechie.com` offers writing only, because the TeX engine lives in NakliOS.
 
 ## Run it locally
 
