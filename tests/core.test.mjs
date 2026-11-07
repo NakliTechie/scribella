@@ -230,7 +230,7 @@ test('SyncTeX: a source line finds its page and box', () => {
 
 test('SyncTeX: a point finds its line, and TeX Live files are skipped', () => {
   const sync = parseSynctex(SYNC);
-  assert.deepEqual(inverse(sync, 1, 110, 118), { file:'main.tex', line:11 });
+  assert.deepEqual(inverse(sync, 1, 110, 119.9), { file:'main.tex', line:11 });
   assert.deepEqual(inverse(sync, 2, 110, 100), { file:'sections/two.tex', line:4 });
   assert.equal(inverse(sync, 9, 1, 1), null);
 });
