@@ -38,7 +38,7 @@
           },
           "template": {
             "type": "string",
-            "description": "article, blank, neurips-2026, icml-2026, iclr-2026, acl, cvpr-2027, aaai-2027, thuthesis or ustcthesis"
+            "description": "article, blank, neurips-2026, icml-2026, iclr-2026, acl or cvpr-2027"
           }
         },
         "required": [

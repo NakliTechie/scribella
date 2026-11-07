@@ -1,5 +1,7 @@
 // Projects are folders under `projects/`. Build output and hidden files stay out of the tree, and `.scribella.json`
 // holds the settings a project carries with it.
+import { escapeText } from './insert.js';
+
 const ROOT = 'projects';
 const SETTINGS = '.scribella.json';
 const TEXT = /\.(tex|ltx|bib|sty|cls|bst|bbx|cbx|txt|md|csv|tsv)$/i;
@@ -66,13 +68,19 @@ export async function loadVenues(load = path => fetch(path).then(reply => { if (
   } }]));
 }
 
+// Venue mains carry a placeholder where the title goes, and its underscores would stop TeX.
+function namedMain(data, title) {
+  const text = typeof data === 'string' ? data : new TextDecoder().decode(data);
+  return text.replaceAll('LATTICE_PROJECT_TITLE', escapeText(title));
+}
+
 export async function createProject(store, name, templateId = 'article', venues = {}) {
   const clean = safeName(name), template = TEMPLATES[templateId] || venues[templateId];
   if (!clean) throw new Error('Give the project a name.');
   if (!template) throw new Error(`There is no template ${templateId}.`);
   if (await store.exists(projectFolder(clean))) throw new Error(`A project called ${clean} already exists.`);
   const files = template.read ? await template.read() : template.files;
-  for (const [path, data] of Object.entries(files)) await store.write(`${projectFolder(clean)}/${path}`, data);
+  for (const [path, data] of Object.entries(files)) await store.write(`${projectFolder(clean)}/${path}`, path === template.main ? namedMain(data, clean) : data);
   await writeSettings(store, clean, { main:template.main, engine:template.engine || 'pdflatex' });
   return clean;
 }

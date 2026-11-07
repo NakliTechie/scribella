@@ -282,10 +282,11 @@ test('the arXiv pack holds what the paper uses', () => {
 test('every venue template lists files that exist, and creates a project', async () => {
   const load = async path => new Response(readFileSync(new URL(`../${path.slice(2)}`, import.meta.url)));
   const venues = await loadVenues(load);
-  assert.equal(Object.keys(venues).length, 8);
+  assert.equal(Object.keys(venues).length, 5);
   const store = memoryStore();
   assert.equal(await createProject(store, 'Paper', 'neurips-2026', venues), 'Paper');
   assert.match(await store.read('projects/Paper/main.tex'), /neurips_2026/);
+  assert.match(await store.read('projects/Paper/main.tex'), /\\title\{Paper\}/);
   assert.ok((await listFiles(store, 'Paper')).includes('neurips_2026.sty'));
 });
 
@@ -342,13 +343,6 @@ test('comment environments and notes on URL lines leave the arXiv source', () =>
   const { text, removed } = stripComments('\\begin{comment}\nsecret\n\\end{comment}\nsee \\url{a%20b} % private\n\\verb|50%| ok');
   assert.equal(text, 'see \\url{a%20b} %\n\\verb|50%| ok');
   assert.equal(removed, 2);
-});
-
-test('thesis templates start on XeLaTeX', async () => {
-  const load = async path => new Response(readFileSync(new URL(`../${path.slice(2)}`, import.meta.url)));
-  const store = memoryStore();
-  await createProject(store, 'T', 'thuthesis', await loadVenues(load));
-  assert.equal((await readSettings(store, 'T')).engine, 'xelatex');
 });
 
 const BIB = `@article{a1, title = {The {T}itle}, author = "Knuth, Donald and Lamport, Leslie", journal = {J}, year = 1984 }
