@@ -214,6 +214,7 @@ async function applyFix(item) {
 }
 
 async function compile() {
+  const project = state.project;
   await saveNow();
   $('build').hidden = true;
   $('cancel').hidden = false;
@@ -227,10 +228,11 @@ async function compile() {
       else say({ queued:'Waiting for TeX…', reading:'Reading the project…', compiling:'Compiling…', writing:'Saving the build…' }[chunk.stage] || 'Working…');
     },
   });
-  try { return await state.job; } finally { state.job = null; }
+  try { return { ...await state.job, project }; } finally { state.job = null; }
 }
 
 async function afterBuild({ result, stale, revision = state.revision }) {
+  if (result.project !== state.project) return;
   const log = result.log ? await store.read(result.log).catch(() => '') : '';
   state.log = log;
   state.problems = visibleDiagnostics(result.diagnostics).map(item => ({ ...item, ...explain(item, { log, source:state.texts[item.file] || '' }) }));
@@ -364,6 +366,7 @@ async function openProject(name) {
   pdf.clear();
   $('pages').textContent = '';
   state.project = name;
+  state.revision += 1;
   state.settings = await readSettings(store, name);
   state.files = await listFiles(store, name);
   state.texts = {};
@@ -650,7 +653,11 @@ async function addPaper(input) {
   if (state.project !== project) return null;
   if (!entry) { say('No record found for that.', true); return null; }
   const file = bibFiles()[0] || 'references.bib', existing = bibEntries();
-  const same = existing.find(item => (entry.fields.doi && item.fields.doi?.toLowerCase() === entry.fields.doi.toLowerCase()) || sameWork(item.fields, entry.fields));
+  const newDoi = entry.fields.doi?.toLowerCase();
+  const same = existing.find(item => {
+    const doi = item.fields.doi?.toLowerCase();
+    return doi && newDoi ? doi === newDoi : sameWork(item.fields, entry.fields);
+  });
   if (same) { say(`Already in the bibliography as ${same.key}.`); return same; }
   // Two papers can share a first author, year and title word, so a taken key gets a letter.
   const base = entry.key;

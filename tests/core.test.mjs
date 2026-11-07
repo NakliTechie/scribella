@@ -475,3 +475,11 @@ test('spellcheck sees prose only, with offsets unchanged', () => {
   assert.equal(masked.length, text.length);
   assert.ok(masked.includes('wrod') && !masked.includes('x_y') && !masked.includes('cite'));
 });
+
+test('review fixes: multi-line authors, Verbatim blocks and starred citations', () => {
+  assert.equal(checkSource({ 'a.tex':'\\author[S]{\n  Ada Lovelace\n}\n' })[0].line, 1);
+  const code = '\\begin{Verbatim}\n   x\n\\end{verbatim}\n   y\n\\end{Verbatim}';
+  assert.equal(formatLatex(code), code);
+  const before = 'A claim here.', next = 'A claim \\citep[see][p. 2]{k1} here.';
+  assert.equal(safeResult(before, wordEdits(before, next), { citeKeys:['k1'] }), next);
+});
