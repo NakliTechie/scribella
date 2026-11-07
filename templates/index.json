@@ -69,7 +69,8 @@
    "thuthesis-author-year.bst",
    "thuthesis-numeric.bst",
    "thuthesis.cls"
-  ]
+  ],
+  "engine": "xelatex"
  },
  "ustcthesis": {
   "label": "USTC thesis",
@@ -84,6 +85,7 @@
    "ustcthesis-authoryear.bst",
    "ustcthesis-numeric.bst",
    "ustcthesis.cls"
-  ]
+  ],
+  "engine": "xelatex"
  }
 }

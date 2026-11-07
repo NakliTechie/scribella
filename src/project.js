@@ -73,7 +73,7 @@ export async function createProject(store, name, templateId = 'article', venues 
   if (await store.exists(projectFolder(clean))) throw new Error(`A project called ${clean} already exists.`);
   const files = template.read ? await template.read() : template.files;
   for (const [path, data] of Object.entries(files)) await store.write(`${projectFolder(clean)}/${path}`, data);
-  await writeSettings(store, clean, { main:template.main, engine:'pdflatex' });
+  await writeSettings(store, clean, { main:template.main, engine:template.engine || 'pdflatex' });
   return clean;
 }
 

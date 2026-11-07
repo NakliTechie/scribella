@@ -333,3 +333,16 @@ test('edits are phrase sized, apply in any subset, and hold protected text', () 
   assert.throws(() => safeResult(before, edits), /not applied/);
   assert.equal(safeResult(before, edits, { allowProtected:true }), after);
 });
+
+test('comment environments and notes on URL lines leave the arXiv source', () => {
+  const { text, removed } = stripComments('\\begin{comment}\nsecret\n\\end{comment}\nsee \\url{a%20b} % private\n\\verb|50%| ok');
+  assert.equal(text, 'see \\url{a%20b} %\n\\verb|50%| ok');
+  assert.equal(removed, 2);
+});
+
+test('thesis templates start on XeLaTeX', async () => {
+  const load = async path => new Response(readFileSync(new URL(`../${path.slice(2)}`, import.meta.url)));
+  const store = memoryStore();
+  await createProject(store, 'T', 'thuthesis', await loadVenues(load));
+  assert.equal((await readSettings(store, 'T')).engine, 'xelatex');
+});

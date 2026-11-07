@@ -249,7 +249,8 @@ function build() {
 // Says whether the saved PDF was built from the text now in the project.
 function sourceHash() {
   let hash = 2166136261;
-  for (const path of Object.keys(state.texts).sort()) for (const char of path + state.texts[path]) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
+  const names = state.files.join('|');
+  for (const path of ['', ...Object.keys(state.texts).sort()]) for (const char of path ? path + state.texts[path] : names) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
   return hash >>> 0;
 }
 
@@ -763,10 +764,18 @@ async function keepVersion(label) {
 async function restoreVersion(version) {
   await keepVersion(`Before restoring ${version.label}`);
   const texts = await readVersion(store, projectRoot(), version.id);
+  for (const path of Object.keys(state.texts)) {
+    if (path in texts) continue;
+    await store.remove(fullPath(path));
+    delete state.texts[path];
+  }
   for (const [path, text] of Object.entries(texts)) { await writeFile(path, text); state.texts[path] = text; }
   state.files = await listFiles(store, state.project);
   state.revision += 1;
-  await openFile(state.files.includes(state.path) ? state.path : state.settings.main);
+  if (!state.files.includes(state.settings.main)) await changeSettings({ main:findMain(state.files, state.texts) });
+  state.dirty = false;
+  state.path = null;
+  await openFile(state.settings.main || state.files[0]);
   showCounts();
   build();
 }
@@ -788,7 +797,7 @@ async function changesPdf(version) {
     data:/\.(tex|ltx)$/i.test(path) ? markChanges(old[path] ?? '', state.texts[path]) : await store.readBinary(fullPath(path)),
   })));
   const result = await scratchBuild(files, state.settings.main);
-  if (!result.pdf) { say('The changes PDF did not build. The marks may clash with a package here.', true); return result; }
+  if (!result.ok || !result.pdf) { say('The changes PDF did not build. The marks may clash with a package here.', true); return result; }
   await pdf.show(await store.readBinary(result.pdf));
   state.sync = null;
   say(`Showing changes since "${version.label}". Build to return to the paper.`);
@@ -798,6 +807,11 @@ async function changesPdf(version) {
 async function arxivPack() {
   if (!canCompile()) { say(COMPILE_HINT()); return null; }
   await saveNow();
+  // The .bbl must match the .bib as it is now, so the paper builds first.
+  const fresh = await compile();
+  $('build').hidden = false; $('cancel').hidden = true;
+  await afterBuild({ result:fresh, stale:false, revision:state.revision });
+  if (!fresh.ok) { say('The paper does not build yet, so no arXiv pack was made.', true); return fresh; }
   const main = state.settings.main, stem = main.replace(/\.[^.]+$/, '');
   const { used, missing } = usedFiles({ files:state.files, texts:state.texts, main });
   if (missing.length) { say(`Missing from the project: ${missing.join(', ')}`, true); return { missing }; }
