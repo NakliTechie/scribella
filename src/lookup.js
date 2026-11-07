@@ -42,7 +42,16 @@ export function fromOpenAlex(work) {
     year:work.publication_year ? String(work.publication_year) : '',
     doi:cleanValue(work.doi?.replace(/^https:\/\/doi\.org\//, '')),
   };
-  return { type:'misc', key:citeKey(fields), fields };
+  const source = work.primary_location?.source, biblio = work.biblio || {};
+  const type = source?.type === 'journal' ? 'article' : source?.type === 'conference' ? 'inproceedings' : 'misc';
+  if (type === 'article') fields.journal = cleanValue(source.display_name);
+  if (type === 'inproceedings') fields.booktitle = cleanValue(source.display_name);
+  if (type !== 'misc') {
+    fields.volume = cleanValue(biblio.volume);
+    fields.number = cleanValue(biblio.issue);
+    fields.pages = biblio.first_page ? cleanValue([biblio.first_page, biblio.last_page].filter(Boolean).join('--')) : '';
+  }
+  return { type, key:citeKey(fields), fields };
 }
 
 const NOTICES = { retraction:'retracted', withdrawal:'retracted', removal:'retracted', 'expression_of_concern':'expression of concern', correction:'corrected', erratum:'corrected', corrigendum:'corrected' };

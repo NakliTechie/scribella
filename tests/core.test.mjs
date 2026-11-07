@@ -489,7 +489,8 @@ test('review fixes: multi-line authors, Verbatim blocks and starred citations', 
 
 test('findings beside blanked LaTeX are dropped', () => {
   const text = 'A wrod. $x$ is fine';
-  assert.deepEqual(keepProse(text, [{ from:2, to:6 }, { from:9, to:12 }, { from:12, to:14 }]).map(item => item.from), [2]);
+  assert.deepEqual(keepProse(text, [{ from:2, to:6 }, { from:9, to:10 }, { from:12, to:14, message:'does not start with a capital letter' }]).map(item => item.from), [2]);
+  assert.equal(keepProse('\\textbf{mispelled}', [{ from:8, to:17, message:'spelling' }]).length, 1, 'a typo inside a prose argument stays');
 });
 
 test('notes land as real PDF annotations', async () => {
@@ -504,4 +505,13 @@ test('discovery lists papers with counts', async () => {
   const found = await discover('x', load);
   assert.equal(found[0].cited, 7);
   assert.equal(found[0].fields.author, 'Lovelace, Ada');
+});
+
+test('OpenAlex venues become proper entries', async () => {
+  const load = async () => new Response(JSON.stringify({ results:[{ title:'T', authorships:[], publication_year:2020, primary_location:{ source:{ type:'journal', display_name:'J&K' } }, biblio:{ volume:'3', issue:'1', first_page:'5', last_page:'9' } }] }));
+  const [entry] = await discover('x', load);
+  assert.equal(entry.type, 'article');
+  assert.equal(entry.fields.journal, 'J\\&K');
+  assert.equal(entry.fields.pages, '5--9');
+  assert.equal(parseBlg("You're missing a field name---line 3\n")[0].severity, 'error');
 });

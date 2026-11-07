@@ -411,7 +411,7 @@
     {
       "name": "review.pdf",
       "description": "Save the Scribella PDF with open notes as real PDF annotations.",
-      "scope": "read",
+      "scope": "write",
       "input": {
         "type": "object",
         "properties": {}

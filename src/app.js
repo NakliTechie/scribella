@@ -662,7 +662,7 @@ async function discoverPapers(query) {
   if (state.project !== project) return [];
   showChecks(`${found.length} papers for "${query}"`, found.map(entry => ({
     title:entry.fields.title, detail:`${entry.fields.author.split(' and ')[0]} · ${entry.fields.year} · cited ${entry.cited} times`,
-    fixLabel:'Add', fix:() => addEntry(entry),
+    fixLabel:'Add', fix:() => { if (state.project !== project) throw new Error('This list belongs to another project.'); return addEntry(entry); },
   })));
   say('Ready.');
   return found.map(({ key, fields, cited }) => ({ key, title:fields.title, year:fields.year, cited }));
@@ -690,7 +690,15 @@ async function reviewPdf() {
   return { notes:placed.length };
 }
 
-async function addEntry(entry) {
+// One add at a time, because each builds on the bibliography the last one left.
+let addQueue = Promise.resolve();
+function addEntry(entry) {
+  const run = addQueue.then(() => addEntryNow(entry));
+  addQueue = run.catch(() => {});
+  return run;
+}
+
+async function addEntryNow(entry) {
   const file = bibFiles()[0] || 'references.bib', existing = bibEntries();
   const newDoi = entry.fields.doi?.toLowerCase();
   const same = existing.find(item => {

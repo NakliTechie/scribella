@@ -17,7 +17,8 @@ export function maskLatex(text) {
 // Blanked-out LaTeX looks like odd spacing and a sentence start, so findings beside it are dropped.
 export function keepProse(text, found) {
   const spans = protectedSpans(text);
-  return found.filter(item => !spans.some(span => item.from <= span.to + 2 && item.to >= span.from));
+  const artefact = item => /capital|space/i.test(item.message || '');
+  return found.filter(item => !spans.some(span => (item.from < span.to && item.to > span.from) || (artefact(item) && item.from <= span.to + 2 && item.to >= span.from)));
 }
 
 async function engine() {
