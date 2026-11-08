@@ -643,8 +643,10 @@ test('the Git proxy forwards only smart-HTTP paths to Overleaf, for known origin
   assert.equal((await ask('/git-proxy/git.overleaf.com/abc123/info/refs?service=other')).status, 400);
   assert.equal((await ask('/git-proxy/git.overleaf.com/abc123/../x')).status, 404);
   assert.equal((await gitProxy(new Request('https://scribella.naklitechie.com/git-proxy/git.overleaf.com/a/info/refs', { headers:{ Origin:'https://elsewhere.com' } }), load)).status, 403);
+  assert.equal((await gitProxy(new Request('https://scribella.naklitechie.com/git-proxy/git.overleaf.com/a1/info/refs?service=git-upload-pack'), load)).status, 200, 'a same-origin GET has no Origin header');
   assert.equal((await ask('/git-proxy/git.overleaf.com/abc123/git-upload-pack', { method:'OPTIONS' })).status, 204);
-  assert.equal(calls.length, 1);
+  assert.equal(calls.length, 2);
+  assert.deepEqual(readSheet('""', 'x.csv').rows, [['']]);
 });
 
 test('a board file cannot carry markup, and sheets keep their quoting', () => {

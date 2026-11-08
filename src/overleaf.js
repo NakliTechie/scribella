@@ -10,6 +10,7 @@ const STATE = '.scribella/overleaf.json';
 const BRANCH = 'master';
 const decode = bytes => new TextDecoder().decode(bytes);
 const sameBytes = (a, b) => a?.length === b?.length && a.every((byte, index) => byte === b[index]);
+const TEXT = /\.(tex|ltx|bib|sty|cls|bst|bbx|cbx|txt|md|csv|tsv|board)$/i;
 const HIDDEN = path => path.split('/').some(part => part.startsWith('.'));
 
 export function overleafProjectId(input) {
@@ -69,9 +70,16 @@ export function overleafSync({ store, root, link, proxy, transport = http, url =
       for (const path of new Set([...Object.keys(theirs), ...Object.keys(before)])) {
         const old = before[path], next = theirs[path], current = mine[path];
         if (sameBytes(old, next)) continue;
-        if (next === undefined) { if (current && sameBytes(current, old)) { await store.remove(`${root}/${path}`); changed.push(path); } continue; }
-        if (current === undefined || sameBytes(current, old) || (!old && !current)) { await store.write(`${root}/${path}`, next); changed.push(path); continue; }
+        if (next === undefined) {
+          if (current && sameBytes(current, old)) { await store.remove(`${root}/${path}`); changed.push(path); }
+          else if (current) conflicts.push(path);
+          continue;
+        }
+        if (current === undefined && old) { await store.write(`${root}/${path}`, next); changed.push(path); conflicts.push(path); continue; }
+        if (current === undefined || sameBytes(current, old)) { await store.write(`${root}/${path}`, next); changed.push(path); continue; }
         if (sameBytes(current, next)) continue;
+        // Both sides changed a file that is not text: the local copy stays, and the person decides.
+        if (!TEXT.test(path)) { conflicts.push(path); continue; }
         const merged = merge3(old ? decode(old) : '', decode(current), decode(next), 'overleaf');
         await store.write(`${root}/${path}`, merged.text);
         changed.push(path);

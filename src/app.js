@@ -359,6 +359,8 @@ async function outsideChange(event) {
     // Our own saves arrive here too; they match what we hold.
     if (text === state.texts[path]) return;
     if (path === state.path && (isSheet(path) || isBoard(path))) {
+      // Our own queued saves also arrive here; while any wait, the newer text in memory wins.
+      if (structuredPending.get(path) > 0) return;
       state.texts[path] = text;
       state.saved[path] = text;
       if (isSheet(path)) { state.sheet = readSheet(text, path); renderSheet(); } else { state.board = readBoard(text); renderBoard(); }
@@ -545,16 +547,18 @@ async function dropFiles(files, at) {
 
 // Data sheets and boards save through the same path as text, so the outside-edit check and versions cover them.
 let structuredQueue = Promise.resolve();
+const structuredPending = new Map();
 function saveStructured(text) {
   const path = state.path;
   state.texts[path] = text;
   state.revision += 1;
   // Saves run in order, so an older one cannot land after a newer one; a failure says so and the next edit retries.
+  structuredPending.set(path, (structuredPending.get(path) || 0) + 1);
   const run = structuredQueue.then(async () => {
     if (state.texts[path] !== text) return;
     await writeFile(path, text);
     state.saved[path] = text;
-  });
+  }).finally(() => structuredPending.set(path, structuredPending.get(path) - 1));
   structuredQueue = run.catch(error => say(`Saving ${path} failed: ${error.message}. Your next change tries again.`, true));
   return run;
 }
@@ -755,7 +759,10 @@ async function linkOverleaf(address, token) {
   const id = overleafProjectId(address);
   if (!id) throw new Error('Paste the Overleaf project address, which holds a 24-character id.');
   if (!token) throw new Error('Paste a Git token from Overleaf: Account settings, Git integration.');
-  await store.write(overleafFile(), JSON.stringify({ ...(await overleafLink()), id, token }));
+  // A different project starts its sync history over, so the old project's files are never the merge base.
+  const old = await overleafLink();
+  if (old.id && old.id !== id) await store.remove(`${projectRoot()}/.scribella/overleaf-git`).catch(() => {});
+  await store.write(overleafFile(), JSON.stringify(old.id === id ? { ...old, token } : { id, token }));
   await renderOverleaf();
   return overleafRun('pull');
 }
@@ -767,7 +774,12 @@ async function overleafRun(direction) {
   const project = state.project;
   say(direction === 'pull' ? 'Pulling from Overleaf…' : 'Sending to Overleaf…');
   const sync = overleafSync({ store, root:projectRoot(), link, proxy:OVERLEAF_PROXY });
-  const result = direction === 'pull' ? await sync.pull() : await sync.push();
+  // Editing waits while files change underneath, so nothing typed meanwhile is lost.
+  editor.setLocked(true);
+  document.body.dataset.locked = 'true';
+  let result;
+  try { result = direction === 'pull' ? await sync.pull() : await sync.push(); }
+  finally { editor.setLocked(false); delete document.body.dataset.locked; }
   if (state.project !== project) return result;
   state.files = await listFiles(store, state.project);
   for (const path of state.files.filter(isText)) { state.texts[path] = await store.read(fullPath(path)); state.saved[path] = state.texts[path]; }
@@ -775,7 +787,7 @@ async function overleafRun(direction) {
   if (state.path) { const keep = state.path; state.path = null; await openFile(state.files.includes(keep) ? keep : state.settings.main); }
   renderTree();
   showCounts();
-  if (result.conflicts?.length) say(`Both sides changed the same lines in ${result.conflicts.join(', ')}. Resolve the marked lines, then push again.`, true);
+  if (result.conflicts?.length) say(`Both sides changed ${result.conflicts.join(', ')}. Resolve the marked lines, or for a deleted or binary file decide which copy to keep, then push again.`, true);
   else if (direction === 'pull') say(result.changed.length ? `Pulled ${result.changed.length} changed ${result.changed.length === 1 ? 'file' : 'files'} from Overleaf.` : 'Overleaf has nothing new.');
   else say(result.pushed ? `Sent ${result.files} ${result.files === 1 ? 'file' : 'files'} to Overleaf.` : 'Nothing to send.');
   return result;

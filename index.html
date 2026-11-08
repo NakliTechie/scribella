@@ -39,6 +39,7 @@ dialog{border:1px solid var(--line);border-radius:8px;padding:16px;width:min(560
 #board{display:block;width:calc(100% - 20px);margin:0 10px;background:#fff;border:1px solid var(--line);touch-action:none;cursor:crosshair}[data-tool][aria-pressed=true]{background:var(--sel)}
 #preview-body h1,#preview-body h2,#preview-body h3{font-size:15px}
 #agent-log li{padding:4px 10px;font-size:13px;white-space:pre-wrap}.agent-you{font-weight:600}.agent-step{color:var(--soft);font-size:12px}#git-log .row{font-size:12px}
+body[data-locked] #sheet-view,body[data-locked] #board-view{pointer-events:none;opacity:.6}
 #new-file-form{padding:6px 8px}#new-file-form input{width:100%}
 #centre{display:grid;grid-template-rows:auto auto minmax(0,1fr) minmax(90px,32%);min-width:0;border-right:1px solid var(--line)}
 #file-name{padding:4px 10px;border-bottom:1px solid var(--line);color:var(--soft);font-size:13px}

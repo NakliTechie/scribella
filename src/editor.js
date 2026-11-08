@@ -97,7 +97,7 @@ function wrapCommand(view, name) {
 
 export function createEditor(parent, { onChange, onSave, onDrop, onShow, onDefinition = () => {}, onSelect = () => {}, describeCite = () => '', describeRef = () => '', spell = null, project, path, keys = 'default' }) {
   let quiet = false;
-  const keyMode = new Compartment(), spellMode = new Compartment();
+  const keyMode = new Compartment(), spellMode = new Compartment(), lockMode = new Compartment();
   const spellLinter = () => linter(async current => (await spell(current.state.doc.toString())).map(item => ({
     from:item.from, to:item.to, severity:'hint', message:item.message,
     actions:item.suggestions.map(name => ({ name, apply(target, from, to) { target.dispatch({ changes:{ from, to, insert:name } }); } })),
@@ -109,6 +109,7 @@ export function createEditor(parent, { onChange, onSave, onDrop, onShow, onDefin
       doc:'',
       extensions:[
         keyMode.of(keysFor(keys)),
+        lockMode.of([]),
         spellMode.of([]),
         keymap.of([
           { key:'Enter', run:current => {
@@ -189,6 +190,7 @@ export function createEditor(parent, { onChange, onSave, onDrop, onShow, onDefin
       return true;
     },
     get cursor() { return view.state.selection.main.head; },
+    setLocked(on) { view.dispatch({ effects:lockMode.reconfigure(on ? EditorView.editable.of(false) : []) }); },
     setSpell(on) { view.dispatch({ effects:spellMode.reconfigure(on ? spellLinter() : []) }); },
     setKeys(mode) { view.dispatch({ effects:keyMode.reconfigure(keysFor(mode)) }); },
     insert(text, at = view.state.selection.main.head) {

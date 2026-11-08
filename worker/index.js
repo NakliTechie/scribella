@@ -16,8 +16,10 @@ function cors(request) {
 }
 
 export async function gitProxy(request, load = fetch) {
-  const url = new URL(request.url), match = GIT_PATH.exec(url.pathname), headers = cors(request);
-  if (!headers) return new Response('Origin not allowed', { status:403 });
+  const url = new URL(request.url), match = GIT_PATH.exec(url.pathname), origin = request.headers.get('Origin');
+  // A same-origin GET carries no Origin header. Any other site's page is refused.
+  if (origin && !ORIGINS.has(origin)) return new Response('Origin not allowed', { status:403 });
+  const headers = cors(request) || {};
   if (request.method === 'OPTIONS') return new Response(null, { status:204, headers });
   if (!match || (request.method !== 'GET' && request.method !== 'POST')) return new Response('Not a Git route', { status:404, headers });
   if (match[2] === 'info/refs' && !/^service=git-(upload|receive)-pack$/.test(url.search.slice(1))) return new Response('Bad service', { status:400, headers });

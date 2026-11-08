@@ -1,21 +1,21 @@
 // A data sheet is a CSV or TSV file shown as a grid. It writes back in the format it came in, quoting what needs it.
 export function parseDelimited(text, separator) {
   const rows = [];
-  let row = [], cell = '', quoted = false;
+  let row = [], cell = '', quoted = false, started = false;
   for (let i = 0; i < text.length; i += 1) {
     const char = text[i];
     if (quoted) {
       if (char === '"' && text[i + 1] === '"') { cell += '"'; i += 1; }
       else if (char === '"') quoted = false;
       else cell += char;
-    } else if (char === '"' && cell === '') quoted = true;
+    } else if (char === '"' && cell === '') { quoted = true; started = true; }
     else if (char === separator) { row.push(cell); cell = ''; }
     else if (char === '\n' || char === '\r') {
       if (char === '\r' && text[i + 1] === '\n') i += 1;
-      row.push(cell); rows.push(row); row = []; cell = '';
+      row.push(cell); rows.push(row); row = []; cell = ''; started = false;
     } else cell += char;
   }
-  if (cell !== '' || row.length) { row.push(cell); rows.push(row); }
+  if (cell !== '' || row.length || started) { row.push(cell); rows.push(row); }
   return rows;
 }
 
