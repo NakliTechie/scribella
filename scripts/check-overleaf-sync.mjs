@@ -35,7 +35,7 @@ try {
   const store = memoryStore({ 'p/notes.tex':'local only\n' });
   const sync = overleafSync({ store, root:'p', link:{ id:'x', token:'t' }, url:`http://127.0.0.1:${server.address().port}/remote.git` });
   const main = async () => new TextDecoder().decode(await store.readBinary('p/main.tex'));
-  const theirs = text => { writeFileSync(path.join(dir, 'seed/main.tex'), text); sh('cd seed && git pull -q && git -c user.email=o@x -c user.name=O commit -qam edit && git push -q origin master'); };
+  const theirs = text => { sh('cd seed && git pull -q'); writeFileSync(path.join(dir, 'seed/main.tex'), text); sh('cd seed && git -c user.email=o@x -c user.name=O commit -qam edit && git push -q origin master'); };
 
   assert.deepEqual((await sync.pull()).changed, ['main.tex']);
   await store.write('p/main.tex', 'line one\nline two MINE\nline three\n');
