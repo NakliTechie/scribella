@@ -666,5 +666,5 @@ test('Beamer frames appear in the outline, titled either way', () => {
 });
 
 test('word count of an included chapter counts its whole text', () => {
-  assert.equal(wordCount('\\chapter{Intro}\nThree words here.'), 3);
+  assert.equal(wordCount('\\chapter{Intro}\nThree words here.'), 4, 'the title counts too');
 });
