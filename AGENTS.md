@@ -9,7 +9,7 @@ Unity sentence: a dense writing desk, source and PDF side by side, for a person 
 - Compiling goes through `naklios.experimental_tex`, so the AGPL engine stays in the host. Writing works on the direct site; compiling needs NakliOS.
 - AI is removable: every layer below revision works with no model.
 - Every control has a `data-command`, and `commands.json` maps it in `parity`.
-- `plan/parity-matrix.md` is the scope. A row turns to `built` only when a check ran.
+- A feature counts as built only when a check ran against it.
 - Code derived from Lattice stays listed in `NOTICE`.
 - UI is light by default.
 
