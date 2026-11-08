@@ -101,6 +101,9 @@ body[data-building] #status::before{content:"● ";color:var(--brand)}
       </div>
       <h2>Outline</h2>
       <ul id="outline"></ul>
+      <h2>Overleaf</h2>
+      <div style="padding:0 8px;font-size:12px;color:var(--soft)" id="overleaf-state"></div>
+      <div class="rail-actions"><button id="overleaf-link" class="btn small" data-command="overleaf-link">Link</button><button id="overleaf-pull" class="btn small" data-command="overleaf-pull" hidden>Pull</button><button id="overleaf-push" class="btn small" data-command="overleaf-push" hidden>Push</button></div>
       <h2>Git history</h2>
       <div class="rail-actions"><button id="git-commit" class="btn small" data-command="git-commit">Commit</button></div>
       <ul id="git-log"></ul>
@@ -172,6 +175,13 @@ body[data-building] #status::before{content:"● ";color:var(--brand)}
   <textarea id="note-body" aria-label="Note" style="height:90px" required></textarea>
   <select id="note-intent" aria-label="Intent" style="margin-top:6px"></select>
   <div class="end"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary" data-command="note-save">Save</button></div>
+</form></dialog>
+<dialog id="overleaf-dialog"><form id="overleaf-form">
+  <h1>Link an Overleaf project</h1>
+  <p class="lede" style="margin:0 0 8px">Uses Overleaf's Git integration, which needs a Git token from Overleaf's account settings. The token stays in this project's hidden settings file, and Git traffic passes through scribella.naklitechie.com, which stores nothing.</p>
+  <input id="overleaf-address" aria-label="Overleaf project address" placeholder="https://www.overleaf.com/project/…" style="width:100%" required>
+  <input id="overleaf-token" type="password" autocomplete="off" aria-label="Overleaf Git token" placeholder="Git token" style="width:100%;margin-top:6px" required>
+  <div class="end"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary" data-command="overleaf-save">Link and pull</button></div>
 </form></dialog>
 <dialog id="palette-dialog">
   <h1>Symbols</h1>

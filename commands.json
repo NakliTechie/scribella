@@ -533,6 +533,24 @@
           "question"
         ]
       }
+    },
+    {
+      "name": "overleaf.pull",
+      "description": "Pull changes from the linked Overleaf project into Scribella, merging with local edits.",
+      "scope": "write",
+      "input": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "overleaf.push",
+      "description": "Send Scribella's changes to the linked Overleaf project.",
+      "scope": "write",
+      "input": {
+        "type": "object",
+        "properties": {}
+      }
     }
   ],
   "parity": {
@@ -613,6 +631,10 @@
     "git-commit": "git.commit",
     "git-commit-open": "view",
     "tab-agent": "view",
-    "agent-ask": "agent.ask"
+    "agent-ask": "agent.ask",
+    "overleaf-link": "view",
+    "overleaf-save": "person: a Git token is the person's own credential",
+    "overleaf-pull": "overleaf.pull",
+    "overleaf-push": "overleaf.push"
   }
 }

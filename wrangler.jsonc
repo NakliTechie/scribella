@@ -1,11 +1,12 @@
 {
-  // scribella.naklitechie.com — assets-only Worker, same shape as sandhi/swage.
+  // scribella.naklitechie.com: static assets, plus the Overleaf Git route in worker/index.js.
   // account_id pinned on purpose: this machine has more than one Cloudflare account.
   "name": "scribella",
   "account_id": "62231b040ed00c96cdcf3a4541eab958",
+  "main": "worker/index.js",
   "compatibility_date": "2026-10-04",
   "workers_dev": false,
   "preview_urls": false,
   "routes": [{ "pattern": "scribella.naklitechie.com", "custom_domain": true }],
-  "assets": { "directory": ".", "html_handling": "auto-trailing-slash", "not_found_handling": "404-page" }
+  "assets": { "directory": ".", "binding": "ASSETS", "html_handling": "auto-trailing-slash", "not_found_handling": "404-page" }
 }

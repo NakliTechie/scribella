@@ -28,6 +28,7 @@ import { blankBoard, boardPdf, boardSvg, readBoard, shapeSvg } from './board.js'
 import { renderMarkdown } from './markdown.js';
 import { projectGit } from './git.js';
 import { SYSTEM, agentTurn } from './agent.js';
+import { STATE_PATH, overleafProjectId, overleafSync } from './overleaf.js';
 import { definitionOf, detectVenue, tokenAt, usesOf } from './latex-edit.js';
 import { checkSpelling } from './spell.js';
 import { parseBlg, parseLabels } from './aux.js';
@@ -414,6 +415,7 @@ async function openProject(name) {
   showCounts();
   await renderVersions();
   await renderGit();
+  await renderOverleaf();
   agent.history = [{ role:'system', content:SYSTEM }];
   $('agent-log').replaceChildren();
   Object.assign(review, { notes:[], rounds:0, proposal:null });
@@ -713,6 +715,46 @@ async function showCommit(item) {
       await setText(path, new TextDecoder().decode(bytes));
     },
   })));
+}
+
+const OVERLEAF_PROXY = 'https://scribella.naklitechie.com/git-proxy';
+const overleafFile = () => `${projectRoot()}/${STATE_PATH}`;
+const overleafLink = async () => (await store.exists(overleafFile()) ? JSON.parse(await store.read(overleafFile())) : {});
+
+async function renderOverleaf() {
+  const link = await overleafLink();
+  $('overleaf-state').textContent = link.id ? `Linked to Overleaf project ${link.id.slice(0, 6)}…` : 'Not linked.';
+  $('overleaf-pull').hidden = $('overleaf-push').hidden = !link.id;
+}
+
+async function linkOverleaf(address, token) {
+  const id = overleafProjectId(address);
+  if (!id) throw new Error('Paste the Overleaf project address, which holds a 24-character id.');
+  if (!token) throw new Error('Paste a Git token from Overleaf: Account settings, Git integration.');
+  await store.write(overleafFile(), JSON.stringify({ ...(await overleafLink()), id, token }));
+  await renderOverleaf();
+  return overleafRun('pull');
+}
+
+async function overleafRun(direction) {
+  await saveNow();
+  const link = await overleafLink();
+  if (!link.id) throw new Error('Link an Overleaf project first.');
+  const project = state.project;
+  say(direction === 'pull' ? 'Pulling from Overleaf…' : 'Sending to Overleaf…');
+  const sync = overleafSync({ store, root:projectRoot(), link, proxy:OVERLEAF_PROXY });
+  const result = direction === 'pull' ? await sync.pull() : await sync.push();
+  if (state.project !== project) return result;
+  state.files = await listFiles(store, state.project);
+  for (const path of state.files.filter(isText)) { state.texts[path] = await store.read(fullPath(path)); state.saved[path] = state.texts[path]; }
+  state.revision += 1;
+  if (state.path) { const keep = state.path; state.path = null; await openFile(state.files.includes(keep) ? keep : state.settings.main); }
+  renderTree();
+  showCounts();
+  if (result.conflicts?.length) say(`Both sides changed the same lines in ${result.conflicts.join(', ')}. Resolve the marked lines, then push again.`, true);
+  else if (direction === 'pull') say(result.changed.length ? `Pulled ${result.changed.length} changed ${result.changed.length === 1 ? 'file' : 'files'} from Overleaf.` : 'Overleaf has nothing new.');
+  else say(result.pushed ? `Sent ${result.files} ${result.files === 1 ? 'file' : 'files'} to Overleaf.` : 'Nothing to send.');
+  return result;
 }
 
 const agent = { history:[{ role:'system', content:SYSTEM }] };
@@ -1451,6 +1493,13 @@ function bindPage() {
   renderSteps();
   bindBoard();
   for (const button of document.querySelectorAll('[data-sheet]')) button.addEventListener('click', () => { try { sheetEdit(button.dataset.sheet); } catch (error) { fail(error); } });
+  $('overleaf-form').addEventListener('submit', event => {
+    event.preventDefault();
+    linkOverleaf($('overleaf-address').value, $('overleaf-token').value.trim()).then(() => { $('overleaf-token').value = ''; $('overleaf-dialog').close(); }).catch(fail);
+  });
+  $('overleaf-link').addEventListener('click', () => $('overleaf-dialog').showModal());
+  $('overleaf-pull').addEventListener('click', () => overleafRun('pull').catch(fail));
+  $('overleaf-push').addEventListener('click', () => overleafRun('push').catch(fail));
   $('git-commit').addEventListener('click', () => { const message = prompt('Describe this snapshot', 'Snapshot'); if (message) commitProject(message).catch(fail); });
   $('agent-form').addEventListener('submit', event => {
     event.preventDefault();
@@ -1555,6 +1604,8 @@ const commands = {
   'versions.save':({ label }) => keepVersion(label),
   async 'versions.changes'({ id }) { const version = (await listVersions(store, projectRoot())).find(item => item.id === id); return changesPdf(version); },
   'arxiv.pack':() => arxivPack(),
+  'overleaf.pull':() => overleafRun('pull'),
+  'overleaf.push':() => overleafRun('push'),
   'git.commit':({ message }) => commitProject(message),
   'git.log':() => gitOf().log(),
   'agent.ask':({ question }) => askAgent(question),

@@ -16,7 +16,7 @@ function hunks(base, side) {
 
 const same = (a, b) => a.from === b.from && a.to === b.to && a.lines.join('\n') === b.lines.join('\n');
 
-export function merge3(baseText, mineText, theirsText) {
+export function merge3(baseText, mineText, theirsText, theirLabel = 'outside') {
   const base = baseText.split('\n'), mine = hunks(base, mineText.split('\n')), theirs = hunks(base, theirsText.split('\n'));
   const all = [...mine.map(hunk => ({ ...hunk, side:'mine' })), ...theirs.map(hunk => ({ ...hunk, side:'theirs' }))].sort((a, b) => a.from - b.from || a.to - b.to);
   const out = [];
@@ -41,7 +41,7 @@ export function merge3(baseText, mineText, theirsText) {
         return [...lines, ...base.slice(cursor, end)];
       };
       conflicts += 1;
-      out.push('<<<<<<< yours', ...text('mine'), '=======', ...text('theirs'), '>>>>>>> outside');
+      out.push('<<<<<<< yours', ...text('mine'), '=======', ...text('theirs'), `>>>>>>> ${theirLabel}`);
     }
     at = end;
   }

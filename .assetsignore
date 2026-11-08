@@ -1,0 +1,6 @@
+worker
+tests
+scripts
+.github
+plan
+node_modules

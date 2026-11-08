@@ -23,6 +23,8 @@ import { formatLatex } from '../src/format.js';
 import { merge3 } from '../src/merge.js';
 import { projectGit } from '../src/git.js';
 import { AGENT_TOOLS, agentTurn } from '../src/agent.js';
+import { overleafProjectId } from '../src/overleaf.js';
+import { gitProxy } from '../worker/index.js';
 import { readSheet, writeSheet } from '../src/sheet.js';
 import { boardPdf, boardSvg, readBoard } from '../src/board.js';
 import { renderMarkdown } from '../src/markdown.js';
@@ -622,4 +624,25 @@ test('the agent loops through tool calls and stops with an answer', async () => 
 test('a commented begin is not an environment', () => {
   const text = '\\begin{document}\n% \\begin{figure}\nx\n\\end{document}';
   assert.equal(environmentAt(text, text.indexOf('x')).name, 'document');
+});
+
+test('Overleaf ids come from a project address', () => {
+  assert.equal(overleafProjectId('https://www.overleaf.com/project/5f1a2b3c4d5e6f7a8b9c0d1e'), '5f1a2b3c4d5e6f7a8b9c0d1e');
+  assert.equal(overleafProjectId('nonsense'), null);
+});
+
+test('the Git proxy forwards only smart-HTTP paths to Overleaf, for known origins', async () => {
+  const calls = [];
+  const load = async (url, init) => { calls.push([url, init.method, init.headers.get('Authorization')]); return new Response('pack', { status:200, headers:{ 'Content-Type':'application/x-git-upload-pack-advertisement' } }); };
+  const ask = (path, init = {}) => gitProxy(new Request(`https://scribella.naklitechie.com${path}`, { ...init, headers:{ Origin:'https://naklios.dev', Authorization:'Basic eA==', ...(init.headers || {}) } }), load);
+  const ok = await ask('/git-proxy/git.overleaf.com/abc123/info/refs?service=git-upload-pack');
+  assert.equal(ok.status, 200);
+  assert.equal(ok.headers.get('Access-Control-Allow-Origin'), 'https://naklios.dev');
+  assert.deepEqual(calls[0], ['https://git.overleaf.com/abc123/info/refs?service=git-upload-pack', 'GET', 'Basic eA==']);
+  assert.equal((await ask('/git-proxy/evil.com/abc/info/refs?service=git-upload-pack')).status, 404);
+  assert.equal((await ask('/git-proxy/git.overleaf.com/abc123/info/refs?service=other')).status, 400);
+  assert.equal((await ask('/git-proxy/git.overleaf.com/abc123/../x')).status, 404);
+  assert.equal((await gitProxy(new Request('https://scribella.naklitechie.com/git-proxy/git.overleaf.com/a/info/refs', { headers:{ Origin:'https://elsewhere.com' } }), load)).status, 403);
+  assert.equal((await ask('/git-proxy/git.overleaf.com/abc123/git-upload-pack', { method:'OPTIONS' })).status, 204);
+  assert.equal(calls.length, 1);
 });
