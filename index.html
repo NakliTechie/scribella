@@ -34,6 +34,7 @@ dialog{border:1px solid var(--line);border-radius:8px;padding:16px;width:min(560
 .note-note{background:#f2c94c44}.note-check{background:#fff3a8}.note-keep{background:#c8efc8}.note-cite{background:#c8dfff}.note-rewrite{background:#ffd0e0}.note-question{background:#ffe0b8}.note-idea{background:#e4d4ff}
 .check{padding:2px 10px 6px;border-bottom:1px solid var(--line)}.check.bad strong,.check.conflict strong{color:var(--bad)}.check.warn strong,.check.update strong{color:var(--warn)}.cite-tip{padding:4px 8px;max-width:420px;font-size:13px}
 .step{margin-left:10px}.step.done{color:var(--brand)}
+#preview{border-bottom:1px solid var(--line);padding:4px 10px;font-size:13px}#preview summary{cursor:pointer;color:var(--soft)}#preview-body{max-height:30vh;overflow:auto;font:15px/1.5 Georgia,serif;padding:6px 0}
 #new-file-form{padding:6px 8px}#new-file-form input{width:100%}
 #centre{display:grid;grid-template-rows:auto auto minmax(0,1fr) minmax(90px,32%);min-width:0;border-right:1px solid var(--line)}
 #file-name{padding:4px 10px;border-bottom:1px solid var(--line);color:var(--soft);font-size:13px}
@@ -41,7 +42,7 @@ dialog{border:1px solid var(--line);border-radius:8px;padding:16px;width:min(560
 #not-text{padding:24px;color:var(--soft)}
 #problems-pane{border-top:1px solid var(--line);overflow:auto;background:var(--bg)}#problems-pane h2{position:sticky;top:0;background:var(--bg);margin:0;padding:6px 10px;text-transform:none;letter-spacing:0;font-size:13px}
 #problems li{padding:2px 10px 8px;border-bottom:1px solid var(--line)}.problem{display:block;width:100%;text-align:left;border:0;background:none;padding:4px 0;cursor:pointer}.problem strong{display:block}.error strong{color:var(--bad)}.warning strong{color:var(--warn)}.place{color:var(--soft);font-size:12px}.problem p{margin:2px 0 0}
-#pdf-side{display:grid;grid-template-rows:auto minmax(0,1fr);min-width:0}#pdf-bar{display:flex;gap:6px;align-items:center;padding:4px 10px;border-bottom:1px solid var(--line);color:var(--soft);font-size:13px}#pdf-bar #pages{margin-right:auto}
+#pdf-side{display:grid;grid-template-rows:auto auto minmax(0,1fr);min-width:0}#pdf-bar{display:flex;gap:6px;align-items:center;padding:4px 10px;border-bottom:1px solid var(--line);color:var(--soft);font-size:13px}#pdf-bar #pages{margin-right:auto}
 #pdf{overflow:auto;background:#e6e3db;position:relative;padding:12px}.pdf-page{background:#fff;margin:0 auto 12px;box-shadow:0 1px 3px #0003;position:relative}.pdf-page canvas{display:block}
 .textLayer{position:absolute;inset:0;overflow:clip;opacity:1;line-height:1;text-size-adjust:none;forced-color-adjust:none;transform-origin:0 0;caret-color:CanvasText}.textLayer span,.textLayer br{color:transparent;position:absolute;white-space:pre;cursor:text;transform-origin:0% 0%}.textLayer ::selection{background:#2f5d5040}
 .mark{position:absolute;pointer-events:none}.mark.sync{background:#f2c94c66;outline:1px solid #c79a00}
@@ -103,7 +104,7 @@ body[data-building] #status::before{content:"● ";color:var(--brand)}
         <input id="search-query" type="search" placeholder="Find in project" aria-label="Find in project" data-command="search-query">
         <input id="search-replace" type="text" placeholder="Replace with" aria-label="Replace with">
         <div><label><input id="search-regex" type="checkbox" data-command="search-regex"> Regex</label><label><input id="search-case" type="checkbox" data-command="search-case"> Case</label></div>
-        <div class="rail-actions" style="padding:0"><button id="replace-all" class="btn small" data-command="replace-all">Replace all</button><button id="search-todos" class="btn small" data-command="search-todos">TODOs</button></div>
+        <div class="rail-actions" style="padding:0"><button id="replace-all" class="btn small" data-command="replace-all">Replace all</button><button id="search-todos" class="btn small" data-command="search-todos">TODOs</button><button id="search-papers" class="btn small" data-command="search-papers">In papers</button></div>
         <span id="search-count"></span>
       </div>
       <ul id="search-results"></ul>
@@ -140,6 +141,7 @@ body[data-building] #status::before{content:"● ";color:var(--brand)}
     <div class="split" data-column="--source" role="separator" aria-label="Resize the source"></div>
     <section id="pdf-side" aria-label="PDF">
       <div id="pdf-bar"><span id="pages"></span><span id="pdf-hits"></span><input id="pdf-find" type="search" placeholder="Find in PDF" aria-label="Find in PDF" data-command="pdf-find" style="width:130px"><button id="definition" class="btn small" data-command="definition" title="F12">Definition</button><button id="show-in-pdf" class="btn small" data-command="show-in-pdf" title="Ctrl or Cmd + Enter. Double-click the PDF to jump back.">Show in PDF</button><button id="zoom-out" class="btn small" data-command="zoom-out" aria-label="Zoom out">−</button><button id="zoom-in" class="btn small" data-command="zoom-in" aria-label="Zoom in">+</button></div>
+      <details id="preview" data-command="preview"><summary>Paragraph preview</summary><div id="preview-body"></div></details>
       <div id="pdf"></div>
     </section>
   </main>

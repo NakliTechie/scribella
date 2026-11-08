@@ -442,6 +442,38 @@
           "kind"
         ]
       }
+    },
+    {
+      "name": "papers.fulltext",
+      "description": "Save the full text of an arXiv paper in the Scribella bibliography as Markdown.",
+      "scope": "write",
+      "input": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key"
+        ]
+      }
+    },
+    {
+      "name": "papers.search",
+      "description": "Search the full texts saved in a Scribella project.",
+      "scope": "read",
+      "input": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
     }
   ],
   "parity": {
@@ -510,6 +542,8 @@
     "review-pdf": "review.pdf",
     "wrap": "file.write",
     "definition": "project.definition",
-    "link-bib": "person: choosing a file from disk is the person's own act"
+    "link-bib": "person: choosing a file from disk is the person's own act",
+    "preview": "view",
+    "search-papers": "papers.search"
   }
 }

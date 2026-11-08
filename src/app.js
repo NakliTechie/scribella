@@ -20,6 +20,9 @@ import { addFields, parseBib, sameWork, scanEntries, writeEntry } from './bib.js
 import { auditEntry, discover, findPaper } from './lookup.js';
 import { checkPdf, checkSource } from './blind.js';
 import { formatLatex } from './format.js';
+import { merge3 } from './merge.js';
+import { paragraphAt, renderParagraph } from './preview.js';
+import { arxivMarkdown } from './papers.js';
 import { definitionOf, detectVenue, tokenAt, usesOf } from './latex-edit.js';
 import { checkSpelling } from './spell.js';
 import { parseBlg, parseLabels } from './aux.js';
@@ -37,7 +40,7 @@ const COMPILE_HINT = () => (naklios?.capabilities?.hosted
   : 'Writing works here. To compile, open Scribella inside NakliOS, where the TeX engine runs.');
 
 let store = null, storeKind = null;
-const state = { sync:null, builtRevision:null, findHits:[], findIndex:-1, project:null, settings:{}, files:[], texts:{}, path:null, dirty:false, revision:0, problems:[], log:'', job:null, auto:true };
+const state = { saved:{}, sync:null, builtRevision:null, findHits:[], findIndex:-1, project:null, settings:{}, files:[], texts:{}, path:null, dirty:false, revision:0, problems:[], log:'', job:null, auto:true };
 let venues = {}, marksTimer = null;
 const review = { notes:[], rounds:0, proposal:null };
 const aiReady = () => naklios?.capabilities?.ai === true;
@@ -111,6 +114,7 @@ async function saveNow() {
   state.dirty = false;
   try {
     await writeFile(state.path, state.texts[state.path]);
+    state.saved[state.path] = state.texts[state.path];
   } catch (error) {
     state.dirty = true;
     say(`Saving failed: ${error.message}`, true);
@@ -342,7 +346,16 @@ async function outsideChange(event) {
     const text = await store.read(fullPath(path));
     // Our own saves arrive here too; they match what we hold.
     if (text === state.texts[path]) return;
-    if (path === state.path && state.dirty) {
+    const merged = path === state.path && state.dirty && state.saved[path] != null ? merge3(state.saved[path], editor.text, text) : null;
+    if (merged && !merged.conflicts) {
+      state.saved[path] = text;
+      state.texts[path] = merged.text;
+      editor.load(merged.text);
+      state.dirty = true;
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => saveNow().catch(fail), AUTOSAVE_MS);
+      say(`${path} changed outside. Both sets of changes are kept.`);
+    } else if (path === state.path && state.dirty) {
       const copy = `${path}.outside-${Date.now()}.txt`;
       await writeFile(copy, text);
       state.files = await listFiles(store, state.project);
@@ -350,6 +363,7 @@ async function outsideChange(event) {
       say(`${path} changed outside while you were typing. Your text stays here, and the other version is in ${copy}.`, true);
     } else {
       state.texts[path] = text;
+      state.saved[path] = text;
       if (path === state.path) editor.load(text);
     }
   } else if (!state.files.includes(path)) delete state.texts[path];
@@ -377,6 +391,7 @@ async function openProject(name) {
   state.files = await listFiles(store, name);
   state.texts = {};
   for (const path of state.files.filter(isText)) state.texts[path] = await store.read(fullPath(path));
+  state.saved = { ...state.texts };
   state.settings.main = state.files.includes(state.settings.main) ? state.settings.main : findMain(state.files, state.texts);
   state.problems = [];
   state.sync = null;
@@ -505,6 +520,40 @@ async function dropFiles(files, at) {
   if (others.length) await addFiles(others);
 }
 
+let katex = null;
+async function showPreview() {
+  if (!$('preview').open) return;
+  katex ||= (await import('../vendor/katex.mjs')).default;
+  const source = paragraphAt(editor.text, editor.cursor);
+  $('preview-body').innerHTML = renderParagraph(source, {
+    labels:state.labels || new Map(),
+    math:(tex, display) => katex.renderToString(tex, { displayMode:display, output:'mathml', throwOnError:false }),
+  });
+}
+
+const paperPath = key => `${projectRoot()}/.scribella/papers/${key.replace(/[^\w.-]/g, '_')}.md`;
+
+async function fetchFullText(key) {
+  const entry = bibEntries().find(item => item.key === key);
+  const id = entry?.fields.eprint || /arxiv\.(.+)$/i.exec(entry?.fields.doi || '')?.[1];
+  if (!id) throw new Error(`${key} has no arXiv id, and only arXiv papers have a full text route here.`);
+  const project = state.project;
+  say(`Reading ${key} from arXiv…`);
+  const markdown = await arxivMarkdown(id);
+  if (state.project !== project) return null;
+  await store.write(paperPath(key), `# ${entry.fields.title}\n\n${markdown}\n`);
+  say(`Saved the full text of ${key}.`);
+  return { key, characters:markdown.length };
+}
+
+async function searchPapers(query) {
+  const folder = `${projectRoot()}/.scribella/papers`;
+  if (!await store.exists(folder)) return [];
+  const texts = {};
+  for (const entry of await store.list(folder)) if (entry.endsWith('.md')) texts[entry.replace(/^.*\//, '').replace(/\.md$/, '')] = await store.read(entry);
+  return findAll(texts, query);
+}
+
 async function goToDefinition(at) {
   const token = tokenAt(editor.text, at);
   if (!token) { say('Put the cursor on a \\ref, \\cite, \\label or \\input key.'); return null; }
@@ -622,6 +671,7 @@ function runSearch() {
 }
 
 async function replaceEverywhere(query, replacement, options) {
+  if (Object.values(state.texts).some(text => findAll({ x:text }, query, options).length)) await keepVersion('Before replace all');
   let total = 0;
   for (const path of Object.keys(state.texts)) {
     const { text, count } = replaceAllIn(state.texts[path], query, replacement, options);
@@ -797,6 +847,8 @@ async function auditReferences() {
   const rows = results.map((result, index) => {
     const notice = result.notices?.length ? `Notice: ${result.notices.join(', ')}. ` : '';
     const row = { title:`${result.key}: ${labels[result.status]}`, detail:`${notice}${result.message || ''}`, status:result.notices?.length ? 'bad' : result.status };
+    const entry = entries[index];
+    if (!result.additions && (entry.fields.eprint || /arxiv/i.test(entry.fields.doi || ''))) Object.assign(row, { fixLabel:'Save full text', fix:() => fetchFullText(entry.key) });
     if (result.additions) Object.assign(row, { fixLabel:'Add the details', fix:() => addEntryDetails(project, entries[index], result.additions) });
     return row;
   });
@@ -1158,6 +1210,10 @@ function bindPage() {
   $('check-setup').addEventListener('click', () => checkSetup().catch(fail));
   $('format').addEventListener('click', () => formatFile().catch(fail));
   renderSteps();
+  $('preview').addEventListener('toggle', () => showPreview().catch(fail));
+  editor.view.dom.addEventListener('keyup', () => { clearTimeout(state.previewTimer); state.previewTimer = setTimeout(() => showPreview().catch(() => {}), 300); });
+  editor.view.dom.addEventListener('click', () => showPreview().catch(() => {}));
+  $('search-papers').addEventListener('click', () => searchPapers($('search-query').value).then(matches => { showMatches([]); showChecks(`${matches.length} matches in saved papers`, matches.map(item => ({ title:item.text, detail:`${item.file}, line ${item.line}` }))); }).catch(fail));
   $('link-bib').addEventListener('change', event => { const [file] = event.target.files; event.target.value = ''; if (file) linkBib(file).catch(fail); });
   $('wrap').addEventListener('change', event => {
     const pick = event.target.value; event.target.value = '';
@@ -1249,6 +1305,8 @@ const commands = {
   'versions.save':({ label }) => keepVersion(label),
   async 'versions.changes'({ id }) { const version = (await listVersions(store, projectRoot())).find(item => item.id === id); return changesPdf(version); },
   'arxiv.pack':() => arxivPack(),
+  'papers.fulltext':({ key }) => fetchFullText(key),
+  'papers.search':({ query }) => searchPapers(query),
   'project.definition':({ path, key, kind }) => definitionOf({ key, kind }, state.texts) ?? (kind === 'label' ? usesOf(key, state.texts) : null),
   'file.format':() => formatFile().then(() => ({ formatted:state.path })),
   'setup.check':() => checkSetup(),

@@ -20,6 +20,8 @@ import { addFields, citeKey, cleanValue, parseBib, sameWork, scanEntries, writeE
 import { auditEntry, findPaper, fromCrossref, noticesOf } from '../src/lookup.js';
 import { checkPdf, checkSource } from '../src/blind.js';
 import { formatLatex } from '../src/format.js';
+import { merge3 } from '../src/merge.js';
+import { paragraphAt, renderParagraph } from '../src/preview.js';
 import { definitionOf, detectVenue, enterAddition, environmentAt, tokenAt, usesOf } from '../src/latex-edit.js';
 import { keepProse, maskLatex } from '../src/spell.js';
 import { annotatePdf, annotationCount } from '../src/review-pdf.js';
@@ -544,4 +546,21 @@ test('definitions and uses across the project', () => {
 test('the venue comes from the preamble', () => {
   assert.equal(detectVenue('\\documentclass{article}\n\\usepackage[preprint]{neurips_2026}\n\\begin{document}\\usepackage{icml}'), 'NeurIPS');
   assert.equal(detectVenue('\\documentclass{article}'), null);
+});
+
+test('three-way merge keeps both sides, and marks a real clash', () => {
+  const base = 'a\nb\nc\nd', mine = 'a\nB\nc\nd', theirs = 'a\nb\nc\nD';
+  assert.deepEqual(merge3(base, mine, theirs), { text:'a\nB\nc\nD', conflicts:0 });
+  assert.deepEqual(merge3(base, mine, mine), { text:mine, conflicts:0 });
+  const clash = merge3(base, 'a\nX\nc\nd', 'a\nY\nc\nd');
+  assert.equal(clash.conflicts, 1);
+  assert.ok(clash.text.includes('<<<<<<< yours\nX\n=======\nY\n>>>>>>> outside'));
+  assert.deepEqual(merge3('a\nb', 'a\nb\nmine', 'top\na\nb'), { text:'top\na\nb\nmine', conflicts:0 });
+});
+
+test('the paragraph preview softens commands and keeps math for KaTeX', () => {
+  const text = 'One.\n\nSee \\emph{this} $x^2$ and Section~\\ref{s} \\cite{k}. % hidden\n\nThree.';
+  assert.equal(paragraphAt(text, text.indexOf('this')), 'See \\emph{this} $x^2$ and Section~\\ref{s} \\cite{k}. % hidden');
+  const html = renderParagraph(paragraphAt(text, text.indexOf('this')), { math:(tex, display) => `<m d=${display}>${tex}</m>`, labels:new Map([['s', { number:'2' }]]) });
+  assert.equal(html, 'See <em>this</em> <m d=false>x^2</m> and Section&nbsp;2 [k]. ');
 });
