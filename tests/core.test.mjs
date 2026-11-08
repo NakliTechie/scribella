@@ -21,6 +21,8 @@ import { auditEntry, findPaper, fromCrossref, noticesOf } from '../src/lookup.js
 import { checkPdf, checkSource } from '../src/blind.js';
 import { formatLatex } from '../src/format.js';
 import { merge3 } from '../src/merge.js';
+import { projectGit } from '../src/git.js';
+import { AGENT_TOOLS, agentTurn } from '../src/agent.js';
 import { readSheet, writeSheet } from '../src/sheet.js';
 import { boardPdf, boardSvg, readBoard } from '../src/board.js';
 import { renderMarkdown } from '../src/markdown.js';
@@ -586,4 +588,33 @@ test('a board draws as SVG and saves as a one-page PDF', async () => {
 
 test('Markdown renders safely', () => {
   assert.equal(renderMarkdown('# T\n- a *b*\n- `c`\n\n<script>x</script> [l](https://x.org)'), '<h1>T</h1><ul><li>a <em>b</em></li><li><code>c</code></li></ul><p>&lt;script&gt;x&lt;/script&gt; <a href="https://x.org" target="_blank" rel="noopener">l</a></p>');
+});
+
+test('Git history commits changes, skips hidden files and reads old versions', async () => {
+  const store = memoryStore({ 'p/main.tex':'one', 'p/.tex-build/main.pdf':'x' });
+  const repo = projectGit(store, 'p');
+  assert.equal((await repo.commitAll('first', 1e6)).changed, 1);
+  await store.write('p/main.tex', 'two');
+  await store.write('p/b.tex', 'b');
+  assert.equal((await repo.commitAll('second', 2e6)).changed, 2);
+  assert.equal(await repo.commitAll('none', 3e6), null);
+  const log = await repo.log();
+  assert.deepEqual(log.map(item => item.message), ['second', 'first']);
+  assert.deepEqual(await repo.changed(log[0].oid), ['b.tex', 'main.tex']);
+  assert.equal(new TextDecoder().decode(await repo.readAt(log[1].oid, 'main.tex')), 'one');
+});
+
+test('the agent loops through tool calls and stops with an answer', async () => {
+  const replies = [
+    { role:'assistant', content:null, tool_calls:[{ id:'1', function:{ name:'read_file', arguments:'{"path":"main.tex"}' } }] },
+    { role:'assistant', content:'It has one section.' },
+  ];
+  const seen = [];
+  const result = await agentTurn([{ role:'user', content:'What is in it?' }], { ask:async () => replies.shift(), run:async (name, args) => { seen.push([name, args.path]); return 'text'; } });
+  assert.equal(result.text, 'It has one section.');
+  assert.deepEqual(seen, [['read_file', 'main.tex']]);
+  assert.equal(result.messages.filter(item => item.role === 'tool').length, 1);
+  assert.equal(AGENT_TOOLS.length, 5);
+  const endless = await agentTurn([], { ask:async () => ({ role:'assistant', tool_calls:[{ id:'x', function:{ name:'search', arguments:'bad json' } }] }), run:async () => { throw new Error('no'); } });
+  assert.match(endless.text, /eight steps/);
 });

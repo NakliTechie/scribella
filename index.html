@@ -38,6 +38,7 @@ dialog{border:1px solid var(--line);border-radius:8px;padding:16px;width:min(560
 #sheet-view,#board-view{min-height:0;overflow:auto;background:#fff}.sheet-scroll{overflow:auto}#sheet{border-collapse:collapse;font:13px ui-monospace,monospace}#sheet td,#sheet th{border:1px solid var(--line);padding:3px 8px;min-width:60px}#sheet th{background:var(--panel)}
 #board{display:block;width:calc(100% - 20px);margin:0 10px;background:#fff;border:1px solid var(--line);touch-action:none;cursor:crosshair}[data-tool][aria-pressed=true]{background:var(--sel)}
 #preview-body h1,#preview-body h2,#preview-body h3{font-size:15px}
+#agent-log li{padding:4px 10px;font-size:13px;white-space:pre-wrap}.agent-you{font-weight:600}.agent-step{color:var(--soft);font-size:12px}#git-log .row{font-size:12px}
 #new-file-form{padding:6px 8px}#new-file-form input{width:100%}
 #centre{display:grid;grid-template-rows:auto auto minmax(0,1fr) minmax(90px,32%);min-width:0;border-right:1px solid var(--line)}
 #file-name{padding:4px 10px;border-bottom:1px solid var(--line);color:var(--soft);font-size:13px}
@@ -100,6 +101,9 @@ body[data-building] #status::before{content:"● ";color:var(--brand)}
       </div>
       <h2>Outline</h2>
       <ul id="outline"></ul>
+      <h2>Git history</h2>
+      <div class="rail-actions"><button id="git-commit" class="btn small" data-command="git-commit">Commit</button></div>
+      <ul id="git-log"></ul>
       <h2>Versions</h2>
       <ul id="versions"></ul>
       <h2>Search</h2>
@@ -126,12 +130,16 @@ body[data-building] #status::before{content:"● ";color:var(--brand)}
       <div id="board-view" hidden><div class="rail-actions" style="padding:6px 10px"><button class="btn small" data-tool="pen" aria-pressed="true" data-command="board-tool">Pen</button><button class="btn small" data-tool="rect" aria-pressed="false" data-command="board-tool">Box</button><button class="btn small" data-tool="ellipse" aria-pressed="false" data-command="board-tool">Ellipse</button><button class="btn small" data-tool="arrow" aria-pressed="false" data-command="board-tool">Arrow</button><button class="btn small" data-tool="text" aria-pressed="false" data-command="board-tool">Text</button><button id="board-undo" class="btn small" data-command="board-undo">Undo</button><button id="board-figure" class="btn small primary" data-command="board-figure">Save as figure PDF</button></div><svg id="board" xmlns="http://www.w3.org/2000/svg"></svg></div>
       <div id="not-text" hidden>This file is not text, so it opens only in the build.</div>
       <div id="problems-pane">
-        <div class="tabs"><button id="tab-problems" class="tab" aria-pressed="true" data-command="tab-problems"><span id="problem-count">No problems</span></button><button id="tab-notes" class="tab" aria-pressed="false" data-command="tab-notes"><span id="notes-tab">Notes (0)</span></button><button id="tab-checks" class="tab" aria-pressed="false" data-command="tab-checks">Checks</button><button id="revise-all" class="btn small" data-command="revise-all" hidden>Revise all notes</button><button id="review-pdf" class="btn small" data-command="review-pdf">Review PDF</button></div>
+        <div class="tabs"><button id="tab-problems" class="tab" aria-pressed="true" data-command="tab-problems"><span id="problem-count">No problems</span></button><button id="tab-notes" class="tab" aria-pressed="false" data-command="tab-notes"><span id="notes-tab">Notes (0)</span></button><button id="tab-checks" class="tab" aria-pressed="false" data-command="tab-checks">Checks</button><button id="tab-agent" class="tab" aria-pressed="false" data-command="tab-agent">Agent</button><button id="revise-all" class="btn small" data-command="revise-all" hidden>Revise all notes</button><button id="review-pdf" class="btn small" data-command="review-pdf">Review PDF</button></div>
         <div id="problems-list"><ul id="problems"></ul></div>
         <div id="checks" hidden>
           <div class="rail-actions" style="padding:6px 10px"><button id="add-paper" class="btn small" data-command="add-paper">Add a paper</button><label class="btn small file-pick">Link a .bib<input id="link-bib" type="file" accept=".bib" data-command="link-bib" aria-label="Link a .bib file"></label><button id="discover" class="btn small" data-command="discover">Find papers</button><button id="check-setup" class="btn small" data-command="check-setup">Check setup</button><button id="check-references" class="btn small" data-command="check-references">Check references</button><button id="check-blind" class="btn small" data-command="check-blind">Double-blind check</button></div>
           <strong id="checks-title" style="padding:0 10px"></strong>
           <ul id="checks-list"></ul>
+        </div>
+        <div id="agent" hidden>
+          <ul id="agent-log"></ul>
+          <form id="agent-form" class="stack" style="padding:6px 10px"><input id="agent-input" aria-label="Ask the agent" placeholder="Ask about your paper, or ask for a change" data-command="agent-ask"><button class="btn small primary">Ask</button></form>
         </div>
         <div id="notes-list" hidden>
           <div id="proposal" hidden>

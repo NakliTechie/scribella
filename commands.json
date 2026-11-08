@@ -492,6 +492,47 @@
         "type": "object",
         "properties": {}
       }
+    },
+    {
+      "name": "git.commit",
+      "description": "Commit every change in the open Scribella project to its local Git history.",
+      "scope": "write",
+      "input": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ]
+      }
+    },
+    {
+      "name": "git.log",
+      "description": "List the local Git history of the open Scribella project.",
+      "scope": "read",
+      "input": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "agent.ask",
+      "description": "Ask Scribella's agent about the open paper; edits it proposes wait for the person.",
+      "scope": "write",
+      "input": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "question"
+        ]
+      }
     }
   ],
   "parity": {
@@ -568,6 +609,10 @@
     "sheet-table": "view",
     "board-tool": "view",
     "board-undo": "file.write",
-    "board-figure": "board.figure"
+    "board-figure": "board.figure",
+    "git-commit": "git.commit",
+    "git-commit-open": "view",
+    "tab-agent": "view",
+    "agent-ask": "agent.ask"
   }
 }

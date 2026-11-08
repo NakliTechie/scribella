@@ -26,6 +26,8 @@ import { arxivMarkdown } from './papers.js';
 import { readSheet, writeSheet } from './sheet.js';
 import { blankBoard, boardPdf, boardSvg, readBoard, shapeSvg } from './board.js';
 import { renderMarkdown } from './markdown.js';
+import { projectGit } from './git.js';
+import { SYSTEM, agentTurn } from './agent.js';
 import { definitionOf, detectVenue, tokenAt, usesOf } from './latex-edit.js';
 import { checkSpelling } from './spell.js';
 import { parseBlg, parseLabels } from './aux.js';
@@ -411,6 +413,9 @@ async function openProject(name) {
   await openFile(state.settings.main || state.files[0]);
   showCounts();
   await renderVersions();
+  await renderGit();
+  agent.history = [{ role:'system', content:SYSTEM }];
+  $('agent-log').replaceChildren();
   Object.assign(review, { notes:[], rounds:0, proposal:null });
   if (await store.exists(notesFile())) Object.assign(review, parseNotes(await store.read(notesFile())));
   renderProposal();
@@ -672,6 +677,89 @@ async function searchPapers(query) {
   const texts = {};
   for (const entry of await store.list(folder)) if (entry.endsWith('.md')) texts[entry.replace(/^.*\//, '').replace(/\.md$/, '')] = await store.read(entry);
   return findAll(texts, query);
+}
+
+const gitOf = () => projectGit(store, projectRoot());
+
+async function renderGit() {
+  const commits = await gitOf().log().catch(() => []);
+  $('git-log').replaceChildren(...commits.map(item => {
+    const row = document.createElement('li');
+    const go = document.createElement('button');
+    go.type = 'button'; go.className = 'row'; go.dataset.command = 'git-commit-open';
+    go.textContent = `${item.message} · ${new Date(item.at).toLocaleString()}`;
+    go.addEventListener('click', () => showCommit(item).catch(fail));
+    row.append(go);
+    return row;
+  }));
+  return commits;
+}
+
+async function commitProject(message) {
+  await saveNow();
+  const result = await gitOf().commitAll(message || 'Snapshot');
+  say(result ? `Committed ${result.changed} ${result.changed === 1 ? 'file' : 'files'}.` : 'Nothing changed since the last commit.');
+  await renderGit();
+  return result;
+}
+
+async function showCommit(item) {
+  const repo = gitOf(), files = await repo.changed(item.oid);
+  showChecks(`${item.message}: ${files.length} ${files.length === 1 ? 'file' : 'files'}`, files.map(path => ({
+    title:path, detail:'Changed in this commit',
+    fixLabel:'Restore this version', fix:async () => {
+      if (!confirm(`Replace ${path} with its version from "${item.message}"? Commit first if you want to keep the current one.`)) return;
+      const bytes = await repo.readAt(item.oid, path);
+      await setText(path, new TextDecoder().decode(bytes));
+    },
+  })));
+}
+
+const agent = { history:[{ role:'system', content:SYSTEM }] };
+
+function agentLine(role, text) {
+  const item = document.createElement('li');
+  item.className = `agent-${role}`;
+  item.textContent = text;
+  $('agent-log').append(item);
+  item.scrollIntoView({ block:'nearest' });
+}
+
+async function agentTool(name, args) {
+  if (name === 'list_files') return state.files;
+  if (name === 'read_file') { if (!(args.path in state.texts)) throw new Error(`${args.path} is not a text file here.`); return state.texts[args.path]; }
+  if (name === 'search') return findAll(state.texts, args.query).slice(0, 40).map(item => `${item.file}:${item.line}: ${item.text}`).join('\n') || 'No matches.';
+  if (name === 'build') {
+    if (!canCompile()) return 'Compiling is not available here.';
+    const { ok, problems } = await commands['build.run']();
+    return ok ? 'Built with no errors.' : `Build failed:\n${problems.map(item => `${item.file}:${item.line} ${item.headline}`).join('\n')}`;
+  }
+  if (name === 'propose_edit') {
+    const text = state.texts[args.path];
+    if (text == null) throw new Error(`${args.path} is not in the project.`);
+    const at = text.indexOf(args.find);
+    if (at < 0 || text.indexOf(args.find, at + 1) >= 0) throw new Error('`find` must appear exactly once in the file.');
+    if (args.path !== state.path) await openFile(args.path);
+    const decision = await showProposal({ file:args.path, from:at, to:at + args.find.length, revision:args.replace, reason:args.reason || 'The agent proposes an edit.' });
+    return `The researcher ${decision} this edit.`;
+  }
+  throw new Error(`Unknown tool ${name}.`);
+}
+
+async function askAgent(question) {
+  if (!aiReady()) throw new Error('Set up AI in NakliOS to use the agent.');
+  await saveNow();
+  agentLine('you', question);
+  agent.history.push({ role:'user', content:question });
+  const project = state.project;
+  const { messages, text } = await agentTurn(agent.history, {
+    ask:async (history, tools) => (await naklios.ai.chat.completions.create({ messages:history, tools, max_tokens:2048, stream:false })).choices[0].message,
+    run:(name, args) => { if (state.project !== project) throw new Error('The project changed.'); return agentTool(name, args); },
+    onStep:name => agentLine('step', `Using ${name.replace('_', ' ')}…`),
+  });
+  agent.history = messages;
+  agentLine('agent', text);
+  return text;
 }
 
 async function goToDefinition(at) {
@@ -1105,6 +1193,14 @@ async function propose({ file, from, to, task = '', note = null, instruction = '
   return new Promise(resolve => { review.proposal.done = resolve; });
 }
 
+// A proposal that already has its replacement, from the agent. It waits on the same Accept and Reject.
+function showProposal({ file, from, to, revision, reason }) {
+  const passage = state.texts[file].slice(from, to);
+  review.proposal = { project:state.project, file, from, to, passage, task:'', note:null, citeKeys:[], revision, reason, edits:wordEdits(passage, revision) };
+  renderProposal();
+  return new Promise(resolve => { review.proposal.done = resolve; });
+}
+
 function chosenEdits() {
   return [...$('proposal-edits').querySelectorAll('input:checked')].map(box => review.proposal.edits[Number(box.dataset.index)]);
 }
@@ -1319,7 +1415,7 @@ function bindPage() {
   $('proposal-reject').addEventListener('click', () => rejectProposal().catch(fail));
   $('proposal-again').addEventListener('click', () => tryAgain().catch(fail));
   $('revise-all').addEventListener('click', () => reviseRound().catch(fail));
-  const tabs = [['tab-problems', 'problems-list'], ['tab-notes', 'notes-list'], ['tab-checks', 'checks']];
+  const tabs = [['tab-problems', 'problems-list'], ['tab-notes', 'notes-list'], ['tab-checks', 'checks'], ['tab-agent', 'agent']];
   for (const [tab, pane] of tabs) $(tab).addEventListener('click', () => {
     for (const [, other] of tabs) $(other).hidden = other !== pane;
     for (const [other] of tabs) $(other).setAttribute('aria-pressed', String(other === tab));
@@ -1332,6 +1428,14 @@ function bindPage() {
   renderSteps();
   bindBoard();
   for (const button of document.querySelectorAll('[data-sheet]')) button.addEventListener('click', () => { try { sheetEdit(button.dataset.sheet); } catch (error) { fail(error); } });
+  $('git-commit').addEventListener('click', () => { const message = prompt('Describe this snapshot', 'Snapshot'); if (message) commitProject(message).catch(fail); });
+  $('agent-form').addEventListener('submit', event => {
+    event.preventDefault();
+    const question = $('agent-input').value.trim();
+    if (!question) return;
+    $('agent-input').value = '';
+    askAgent(question).catch(error => { agentLine('step', error.message); fail(error); });
+  });
   $('preview').addEventListener('toggle', () => showPreview().catch(fail));
   editor.view.dom.addEventListener('keyup', () => { clearTimeout(state.previewTimer); state.previewTimer = setTimeout(() => showPreview().catch(() => {}), 300); });
   editor.view.dom.addEventListener('click', () => showPreview().catch(() => {}));
@@ -1428,6 +1532,9 @@ const commands = {
   'versions.save':({ label }) => keepVersion(label),
   async 'versions.changes'({ id }) { const version = (await listVersions(store, projectRoot())).find(item => item.id === id); return changesPdf(version); },
   'arxiv.pack':() => arxivPack(),
+  'git.commit':({ message }) => commitProject(message),
+  'git.log':() => gitOf().log(),
+  'agent.ask':({ question }) => askAgent(question),
   'board.new':() => newBoard().then(path => ({ path })),
   'board.figure':() => (isBoard(state.path) ? boardFigure() : Promise.reject(new Error('Open a board first.'))),
   'papers.fulltext':({ key }) => fetchFullText(key),
