@@ -668,3 +668,7 @@ test('Beamer frames appear in the outline, titled either way', () => {
 test('word count of an included chapter counts its whole text', () => {
   assert.equal(wordCount('\\chapter{Intro}\nThree words here.'), 4, 'the title counts too');
 });
+
+test('a commented input is not part of the paper', () => {
+  assert.deepEqual(usedFiles({ files:['main.tex', 'old.tex'], texts:{ 'main.tex':'% \\input{old}\n', 'old.tex':'x' }, main:'main.tex' }).used, ['main.tex']);
+});

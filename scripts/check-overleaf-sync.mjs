@@ -50,6 +50,15 @@ try {
   assert.deepEqual((await sync.push('clash')).conflicts, ['main.tex']);
   assert.match(await main(), /<<<<<<< yours\nline two CLASH mine\n=======\nline two CLASH theirs\n>>>>>>> overleaf/);
   assert.deepEqual((await sync.push('still marked')).conflicts, ['main.tex'], 'a file with markers is never pushed');
+  // A delete-versus-change conflict blocks the push until the local copy changes.
+  await store.write('p/main.tex', 'resolved\n');
+  assert.equal((await sync.push('resolved')).pushed, true);
+  await store.write('p/notes.tex', 'local edit\n');
+  sh('cd seed && git pull -q && git rm -q notes.tex && git -c user.email=o@x -c user.name=O commit -qm gone && git push -q origin master');
+  assert.deepEqual((await sync.pull()).conflicts, ['notes.tex']);
+  assert.deepEqual((await sync.push('again')).conflicts, ['notes.tex'], 'the conflict outlives the pull that found it');
+  await store.write('p/notes.tex', 'local edit, kept on purpose\n');
+  assert.equal((await sync.push('kept')).pushed, true);
   console.log('Overleaf sync against git http-backend: PASS');
 } finally {
   server.close();

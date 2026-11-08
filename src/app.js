@@ -362,8 +362,8 @@ async function outsideChange(event) {
     // Our own saves arrive here too; they match what we hold.
     if (text === state.texts[path]) return;
     if (path === state.path && (isSheet(path) || isBoard(path))) {
-      // Our own queued saves also arrive here; while any wait, the newer text in memory wins.
-      if (structuredPending.get(path) > 0) return;
+      // Our own saves arrive here too; only text we did not write counts as an outside change.
+      if (selfWritten.get(path)?.has(text)) return;
       state.texts[path] = text;
       state.saved[path] = text;
       if (isSheet(path)) { state.sheet = readSheet(text, path); renderSheet(); } else { state.board = readBoard(text); renderBoard(); }
@@ -550,18 +550,19 @@ async function dropFiles(files, at) {
 
 // Data sheets and boards save through the same path as text, so the outside-edit check and versions cover them.
 let structuredQueue = Promise.resolve();
-const structuredPending = new Map();
+const selfWritten = new Map();
 function saveStructured(text) {
   const path = state.path;
   state.texts[path] = text;
   state.revision += 1;
   // Saves run in order, so an older one cannot land after a newer one; a failure says so and the next edit retries.
-  structuredPending.set(path, (structuredPending.get(path) || 0) + 1);
+  if (!selfWritten.has(path)) selfWritten.set(path, new Set());
+  selfWritten.get(path).add(text);
   const run = structuredQueue.then(async () => {
     if (state.texts[path] !== text) return;
     await writeFile(path, text);
     state.saved[path] = text;
-  }).finally(() => structuredPending.set(path, structuredPending.get(path) - 1));
+  });
   structuredQueue = run.catch(error => say(`Saving ${path} failed: ${error.message}. Your next change tries again.`, true));
   return run;
 }
@@ -775,6 +776,7 @@ async function overleafRun(direction) {
   const link = await overleafLink();
   if (!link.id) throw new Error('Link an Overleaf project first.');
   const project = state.project;
+  await structuredQueue;
   say(direction === 'pull' ? 'Pulling from Overleaf…' : 'Sending to Overleaf…');
   const sync = overleafSync({ store, root:projectRoot(), link, proxy:OVERLEAF_PROXY });
   // Editing waits while files change underneath, so nothing typed meanwhile is lost.
