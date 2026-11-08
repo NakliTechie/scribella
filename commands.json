@@ -474,6 +474,24 @@
           "query"
         ]
       }
+    },
+    {
+      "name": "board.new",
+      "description": "Make a new whiteboard figure in the open Scribella project and open it.",
+      "scope": "write",
+      "input": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "board.figure",
+      "description": "Save the open Scribella whiteboard as a PDF figure beside it.",
+      "scope": "write",
+      "input": {
+        "type": "object",
+        "properties": {}
+      }
     }
   ],
   "parity": {
@@ -544,6 +562,12 @@
     "definition": "project.definition",
     "link-bib": "person: choosing a file from disk is the person's own act",
     "preview": "view",
-    "search-papers": "papers.search"
+    "search-papers": "papers.search",
+    "sheet-row": "file.write",
+    "sheet-column": "file.write",
+    "sheet-table": "view",
+    "board-tool": "view",
+    "board-undo": "file.write",
+    "board-figure": "board.figure"
   }
 }

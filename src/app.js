@@ -23,6 +23,9 @@ import { formatLatex } from './format.js';
 import { merge3 } from './merge.js';
 import { paragraphAt, renderParagraph } from './preview.js';
 import { arxivMarkdown } from './papers.js';
+import { readSheet, writeSheet } from './sheet.js';
+import { blankBoard, boardPdf, boardSvg, readBoard, shapeSvg } from './board.js';
+import { renderMarkdown } from './markdown.js';
 import { definitionOf, detectVenue, tokenAt, usesOf } from './latex-edit.js';
 import { checkSpelling } from './spell.js';
 import { parseBlg, parseLabels } from './aux.js';
@@ -106,7 +109,9 @@ const fullPath = path => `${projectFolder(state.project)}/${path}`;
 const writeFile = (path, data) => store.write(fullPath(path), data);
 const sameName = (a, b) => a.toLowerCase() === b.toLowerCase();
 const fileExists = path => state.files.find(file => sameName(file, path));
-const editingText = () => !!state.path && isText(state.path);
+const isSheet = path => /\.(csv|tsv)$/i.test(path || '');
+const isBoard = path => /\.board$/i.test(path || '');
+const editingText = () => !!state.path && isText(state.path) && !isSheet(state.path) && !isBoard(state.path);
 
 async function saveNow() {
   clearTimeout(saveTimer);
@@ -325,15 +330,16 @@ async function openFile(path) {
   clearTimeout(saveTimer);
   state.path = path;
   $('file-name').textContent = path;
-  const text = isText(path);
-  $('editor').hidden = !text;
-  $('not-text').hidden = text;
-  if (text) {
-    state.texts[path] ??= await store.read(fullPath(path));
-    editor.load(state.texts[path]);
-    showNoteMarks();
-  }
+  const text = isText(path), view = isSheet(path) ? 'sheet' : isBoard(path) ? 'board' : text ? 'editor' : 'none';
+  for (const [id, name] of [['editor', 'editor'], ['sheet-view', 'sheet'], ['board-view', 'board']]) $(id).hidden = view !== name;
+  $('not-text').hidden = view !== 'none';
+  if (text) state.texts[path] ??= await store.read(fullPath(path));
+  if (view === 'editor') { editor.load(state.texts[path]); showNoteMarks(); }
+  if (view === 'sheet') { state.sheet = readSheet(state.texts[path], path); renderSheet(); }
+  if (view === 'board') { state.board = readBoard(state.texts[path]); renderBoard(); }
+  $('preview').hidden = view !== 'editor';
   renderTree();
+  showPreview().catch(() => {});
 }
 
 // Edits from outside the page, such as an agent or another tab, reach the editor and start a build.
@@ -520,9 +526,123 @@ async function dropFiles(files, at) {
   if (others.length) await addFiles(others);
 }
 
+// Data sheets and boards save through the same path as text, so the outside-edit check and versions cover them.
+async function saveStructured(text) {
+  state.texts[state.path] = text;
+  state.revision += 1;
+  await writeFile(state.path, text);
+  state.saved[state.path] = text;
+}
+
+function renderSheet() {
+  const { rows } = state.sheet;
+  $('sheet').replaceChildren(...rows.map((row, r) => {
+    const tr = document.createElement('tr');
+    tr.append(...row.map((cell, c) => {
+      const td = document.createElement(r ? 'td' : 'th');
+      td.contentEditable = 'plaintext-only';
+      td.textContent = cell;
+      td.addEventListener('blur', () => {
+        if (rows[r][c] === td.textContent) return;
+        rows[r][c] = td.textContent;
+        saveStructured(writeSheet(state.sheet)).catch(fail);
+      });
+      return td;
+    }));
+    return tr;
+  }));
+}
+
+function sheetEdit(action) {
+  const { rows } = state.sheet;
+  if (action === 'row') rows.push(Array(rows[0].length).fill(''));
+  if (action === 'column') rows.forEach(row => row.push(''));
+  if (action === 'table') {
+    if (!state.settings.main) throw new Error('This project has no main file.');
+    const name = state.path.replace(/^.*\//, '');
+    state.pendingInsert = tableBlock(rows, { caption:name, label:slug(name) });
+    say(`Open a .tex file and use Insert, Table from data, to place this table. It is copied to the table box.`);
+    $('table-data').value = writeSheet(state.sheet);
+    return;
+  }
+  renderSheet();
+  saveStructured(writeSheet(state.sheet)).catch(fail);
+}
+
+const board = { tool:'pen', drawing:null };
+
+function renderBoard() {
+  const svg = $('board');
+  svg.setAttribute('viewBox', `0 0 ${state.board.width} ${state.board.height}`);
+  svg.innerHTML = state.board.shapes.map(shapeSvg).join('') + (board.drawing ? shapeSvg(board.drawing) : '');
+}
+
+function boardPoint(event) {
+  const box = $('board').getBoundingClientRect();
+  return [(event.clientX - box.left) * state.board.width / box.width, (event.clientY - box.top) * state.board.height / box.height];
+}
+
+function bindBoard() {
+  const svg = $('board');
+  svg.addEventListener('pointerdown', event => {
+    const [x, y] = boardPoint(event);
+    if (board.tool === 'text') {
+      const text = prompt('Text');
+      if (text) { state.board.shapes.push({ kind:'text', x, y, text }); renderBoard(); saveStructured(JSON.stringify(state.board)).catch(fail); }
+      return;
+    }
+    svg.setPointerCapture(event.pointerId);
+    board.drawing = board.tool === 'pen' ? { kind:'pen', points:[[x, y]] } : board.tool === 'arrow' ? { kind:'arrow', x1:x, y1:y, x2:x, y2:y } : { kind:board.tool, x, y, w:0, h:0 };
+  });
+  svg.addEventListener('pointermove', event => {
+    const shape = board.drawing;
+    if (!shape) return;
+    const [x, y] = boardPoint(event);
+    if (shape.kind === 'pen') shape.points.push([x, y]);
+    else if (shape.kind === 'arrow') Object.assign(shape, { x2:x, y2:y });
+    else Object.assign(shape, { w:x - shape.x, h:y - shape.y });
+    renderBoard();
+  });
+  svg.addEventListener('pointerup', () => {
+    if (!board.drawing) return;
+    state.board.shapes.push(board.drawing);
+    board.drawing = null;
+    renderBoard();
+    saveStructured(JSON.stringify(state.board)).catch(fail);
+  });
+  for (const button of document.querySelectorAll('[data-tool]')) button.addEventListener('click', () => {
+    board.tool = button.dataset.tool;
+    for (const other of document.querySelectorAll('[data-tool]')) other.setAttribute('aria-pressed', String(other === button));
+  });
+  $('board-undo').addEventListener('click', () => { state.board.shapes.pop(); renderBoard(); saveStructured(JSON.stringify(state.board)).catch(fail); });
+  $('board-figure').addEventListener('click', () => boardFigure().catch(fail));
+}
+
+// Saves the board as a PDF beside it, ready for \includegraphics.
+async function boardFigure() {
+  const pdfPath = state.path.replace(/\.board$/i, '.pdf');
+  await writeFile(pdfPath, await boardPdf(state.board));
+  state.files = await listFiles(store, state.project);
+  renderTree();
+  say(`Saved ${pdfPath}. Include it with \\includegraphics{${pdfPath}}.`);
+  return { pdf:pdfPath };
+}
+
+async function newBoard() {
+  let index = 1;
+  while (fileExists(`figures/board-${index}.board`)) index += 1;
+  const path = `figures/board-${index}.board`;
+  await writeFile(path, JSON.stringify(blankBoard()));
+  state.texts[path] = JSON.stringify(blankBoard());
+  state.files = await listFiles(store, state.project);
+  await openFile(path);
+  return path;
+}
+
 let katex = null;
 async function showPreview() {
   if (!$('preview').open) return;
+  if (/\.md$/i.test(state.path || '')) { $('preview-body').innerHTML = renderMarkdown(editor.text); return; }
   katex ||= (await import('../vendor/katex.mjs')).default;
   const source = paragraphAt(editor.text, editor.cursor);
   $('preview-body').innerHTML = renderParagraph(source, {
@@ -1210,6 +1330,8 @@ function bindPage() {
   $('check-setup').addEventListener('click', () => checkSetup().catch(fail));
   $('format').addEventListener('click', () => formatFile().catch(fail));
   renderSteps();
+  bindBoard();
+  for (const button of document.querySelectorAll('[data-sheet]')) button.addEventListener('click', () => { try { sheetEdit(button.dataset.sheet); } catch (error) { fail(error); } });
   $('preview').addEventListener('toggle', () => showPreview().catch(fail));
   editor.view.dom.addEventListener('keyup', () => { clearTimeout(state.previewTimer); state.previewTimer = setTimeout(() => showPreview().catch(() => {}), 300); });
   editor.view.dom.addEventListener('click', () => showPreview().catch(() => {}));
@@ -1255,10 +1377,11 @@ function bindPage() {
   $('insert').addEventListener('change', event => {
     const pick = event.target.value;
     event.target.value = '';
-    if (pick && !editingText()) { say('Open a text file first.', true); return; }
+    if (pick && pick !== 'board' && !editingText()) { say('Open a text file first.', true); return; }
     if (pick === 'table') $('table-dialog').showModal();
     if (pick === 'symbol') { openPalette(); $('palette-dialog').showModal(); }
     if (pick === 'figure') $('figure-file').click();
+    if (pick === 'board') newBoard().catch(fail);
   });
   $('figure-file').addEventListener('change', event => { const files = [...event.target.files]; event.target.value = ''; dropFiles(files, editor.view.state.selection.main.head).catch(fail); });
   $('symbol-filter').addEventListener('input', openPalette);
@@ -1305,6 +1428,8 @@ const commands = {
   'versions.save':({ label }) => keepVersion(label),
   async 'versions.changes'({ id }) { const version = (await listVersions(store, projectRoot())).find(item => item.id === id); return changesPdf(version); },
   'arxiv.pack':() => arxivPack(),
+  'board.new':() => newBoard().then(path => ({ path })),
+  'board.figure':() => (isBoard(state.path) ? boardFigure() : Promise.reject(new Error('Open a board first.'))),
   'papers.fulltext':({ key }) => fetchFullText(key),
   'papers.search':({ query }) => searchPapers(query),
   'project.definition':({ path, key, kind }) => definitionOf({ key, kind }, state.texts) ?? (kind === 'label' ? usesOf(key, state.texts) : null),

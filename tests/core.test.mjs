@@ -21,6 +21,9 @@ import { auditEntry, findPaper, fromCrossref, noticesOf } from '../src/lookup.js
 import { checkPdf, checkSource } from '../src/blind.js';
 import { formatLatex } from '../src/format.js';
 import { merge3 } from '../src/merge.js';
+import { readSheet, writeSheet } from '../src/sheet.js';
+import { boardPdf, boardSvg, readBoard } from '../src/board.js';
+import { renderMarkdown } from '../src/markdown.js';
 import { paragraphAt, renderParagraph } from '../src/preview.js';
 import { definitionOf, detectVenue, enterAddition, environmentAt, tokenAt, usesOf } from '../src/latex-edit.js';
 import { keepProse, maskLatex } from '../src/spell.js';
@@ -563,4 +566,24 @@ test('the paragraph preview softens commands and keeps math for KaTeX', () => {
   assert.equal(paragraphAt(text, text.indexOf('this')), 'See \\emph{this} $x^2$ and Section~\\ref{s} \\cite{k}. % hidden');
   const html = renderParagraph(paragraphAt(text, text.indexOf('this')), { math:(tex, display) => `<m d=${display}>${tex}</m>`, labels:new Map([['s', { number:'2' }]]) });
   assert.equal(html, 'See <em>this</em> <m d=false>x^2</m> and Section&nbsp;2 [k]. ');
+});
+
+test('data sheets round trip and pad short rows', () => {
+  const sheet = readSheet('a,b\n1\n"x,y",2\n', 'd.csv');
+  assert.deepEqual(sheet.rows, [['a', 'b'], ['1', ''], ['x,y', '2']]);
+  assert.equal(writeSheet(sheet), 'a,b\n1,\n"x,y",2\n');
+  assert.equal(readSheet('a\tb\n', 'd.tsv').separator, '\t');
+});
+
+test('a board draws as SVG and saves as a one-page PDF', async () => {
+  const board = readBoard(JSON.stringify({ width:200, height:100, shapes:[{ kind:'pen', points:[[1, 1], [5, 5]] }, { kind:'rect', x:10, y:10, w:-5, h:20 }, { kind:'ellipse', x:50, y:10, w:20, h:20 }, { kind:'arrow', x1:0, y1:0, x2:50, y2:50 }, { kind:'text', x:5, y:90, text:'A<b>' }] }));
+  const svg = boardSvg(board);
+  assert.ok(svg.includes('A&lt;b&gt;') && svg.includes('<ellipse'));
+  const pdf = await PDFDocument.load(await boardPdf(board));
+  assert.equal(pdf.getPageCount(), 1);
+  assert.deepEqual(readBoard('nonsense').shapes, []);
+});
+
+test('Markdown renders safely', () => {
+  assert.equal(renderMarkdown('# T\n- a *b*\n- `c`\n\n<script>x</script> [l](https://x.org)'), '<h1>T</h1><ul><li>a <em>b</em></li><li><code>c</code></li></ul><p>&lt;script&gt;x&lt;/script&gt; <a href="https://x.org" target="_blank" rel="noopener">l</a></p>');
 });

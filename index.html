@@ -35,6 +35,9 @@ dialog{border:1px solid var(--line);border-radius:8px;padding:16px;width:min(560
 .check{padding:2px 10px 6px;border-bottom:1px solid var(--line)}.check.bad strong,.check.conflict strong{color:var(--bad)}.check.warn strong,.check.update strong{color:var(--warn)}.cite-tip{padding:4px 8px;max-width:420px;font-size:13px}
 .step{margin-left:10px}.step.done{color:var(--brand)}
 #preview{border-bottom:1px solid var(--line);padding:4px 10px;font-size:13px}#preview summary{cursor:pointer;color:var(--soft)}#preview-body{max-height:30vh;overflow:auto;font:15px/1.5 Georgia,serif;padding:6px 0}
+#sheet-view,#board-view{min-height:0;overflow:auto;background:#fff}.sheet-scroll{overflow:auto}#sheet{border-collapse:collapse;font:13px ui-monospace,monospace}#sheet td,#sheet th{border:1px solid var(--line);padding:3px 8px;min-width:60px}#sheet th{background:var(--panel)}
+#board{display:block;width:calc(100% - 20px);margin:0 10px;background:#fff;border:1px solid var(--line);touch-action:none;cursor:crosshair}[data-tool][aria-pressed=true]{background:var(--sel)}
+#preview-body h1,#preview-body h2,#preview-body h3{font-size:15px}
 #new-file-form{padding:6px 8px}#new-file-form input{width:100%}
 #centre{display:grid;grid-template-rows:auto auto minmax(0,1fr) minmax(90px,32%);min-width:0;border-right:1px solid var(--line)}
 #file-name{padding:4px 10px;border-bottom:1px solid var(--line);color:var(--soft);font-size:13px}
@@ -73,7 +76,7 @@ body[data-building] #status::before{content:"● ";color:var(--brand)}
     <strong id="project-name"></strong>
     <label>Main file <select id="main-file" data-command="main-file"></select></label>
     <label>Engine <select id="engine" data-command="engine"><option value="pdflatex">pdfLaTeX</option><option value="xelatex">XeLaTeX</option><option value="lualatex">LuaLaTeX</option></select></label>
-    <select id="insert" data-command="insert" aria-label="Insert"><option value="">Insert…</option><option value="figure">Figure</option><option value="table">Table from data</option><option value="symbol">Symbol</option></select>
+    <select id="insert" data-command="insert" aria-label="Insert"><option value="">Insert…</option><option value="figure">Figure</option><option value="table">Table from data</option><option value="symbol">Symbol</option><option value="board">New whiteboard</option></select>
     <select id="keys" data-command="keys" aria-label="Keys"><option value="default">Standard keys</option><option value="vim">Vim</option><option value="emacs">Emacs</option></select>
     <label><input id="spell" type="checkbox" data-command="spell"> Spelling</label>
     <label><input id="auto" type="checkbox" checked data-command="toggle-auto"> Build on save</label>
@@ -119,6 +122,8 @@ body[data-building] #status::before{content:"● ";color:var(--brand)}
         <span id="ai-tools" hidden><button id="proofread" class="btn small" data-command="proofread">Proofread</button> <button id="polish" class="btn small" data-command="polish">Polish</button> <button id="rewrite" class="btn small" data-command="rewrite">Rewrite…</button></span>
       </div>
       <div id="editor"></div>
+      <div id="sheet-view" hidden><div class="rail-actions" style="padding:6px 10px"><button class="btn small" data-sheet="row" data-command="sheet-row">Add row</button><button class="btn small" data-sheet="column" data-command="sheet-column">Add column</button><button class="btn small" data-sheet="table" data-command="sheet-table">Use as a table</button></div><div class="sheet-scroll"><table id="sheet"></table></div></div>
+      <div id="board-view" hidden><div class="rail-actions" style="padding:6px 10px"><button class="btn small" data-tool="pen" aria-pressed="true" data-command="board-tool">Pen</button><button class="btn small" data-tool="rect" aria-pressed="false" data-command="board-tool">Box</button><button class="btn small" data-tool="ellipse" aria-pressed="false" data-command="board-tool">Ellipse</button><button class="btn small" data-tool="arrow" aria-pressed="false" data-command="board-tool">Arrow</button><button class="btn small" data-tool="text" aria-pressed="false" data-command="board-tool">Text</button><button id="board-undo" class="btn small" data-command="board-undo">Undo</button><button id="board-figure" class="btn small primary" data-command="board-figure">Save as figure PDF</button></div><svg id="board" xmlns="http://www.w3.org/2000/svg"></svg></div>
       <div id="not-text" hidden>This file is not text, so it opens only in the build.</div>
       <div id="problems-pane">
         <div class="tabs"><button id="tab-problems" class="tab" aria-pressed="true" data-command="tab-problems"><span id="problem-count">No problems</span></button><button id="tab-notes" class="tab" aria-pressed="false" data-command="tab-notes"><span id="notes-tab">Notes (0)</span></button><button id="tab-checks" class="tab" aria-pressed="false" data-command="tab-checks">Checks</button><button id="revise-all" class="btn small" data-command="revise-all" hidden>Revise all notes</button><button id="review-pdf" class="btn small" data-command="review-pdf">Review PDF</button></div>
