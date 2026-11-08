@@ -20,6 +20,7 @@ import { addFields, parseBib, sameWork, scanEntries, writeEntry } from './bib.js
 import { auditEntry, discover, findPaper } from './lookup.js';
 import { checkPdf, checkSource } from './blind.js';
 import { formatLatex } from './format.js';
+import { definitionOf, detectVenue, tokenAt, usesOf } from './latex-edit.js';
 import { checkSpelling } from './spell.js';
 import { parseBlg, parseLabels } from './aux.js';
 import { MAX_PASSAGE, buildMessages, parseReply, safeResult, wordEdits } from './revise.js';
@@ -68,6 +69,7 @@ const editor = createEditor($('editor'), {
   project:projectIndex,
   keys:readKeys(),
   onShow:() => showInPdf(),
+  onDefinition:at => goToDefinition(at).catch(fail),
   spell:text => (/\.(tex|ltx|md|txt)$/i.test(state.path || '') ? checkSpelling(text).catch(error => { say(`Spellcheck failed: ${error.message}`, true); return []; }) : Promise.resolve([])),
   describeRef:key => {
     const label = state.labels?.get(key);
@@ -118,7 +120,8 @@ async function saveNow() {
 
 function showCounts() {
   const main = state.texts[state.settings.main];
-  $('words').textContent = main ? `About ${wordCount(main).toLocaleString('en')} words` : '';
+  const venue = main && detectVenue(main);
+  $('words').textContent = main ? `${venue ? `${venue} · ` : ''}About ${wordCount(main).toLocaleString('en')} words` : '';
   renderOutline();
 }
 
@@ -500,6 +503,32 @@ async function dropFiles(files, at) {
   const images = files.filter(file => isImage(file.name)), others = files.filter(file => !isImage(file.name));
   for (const path of await addFiles(images, 'figures/')) editor.insert(figureBlock({ path }), at);
   if (others.length) await addFiles(others);
+}
+
+async function goToDefinition(at) {
+  const token = tokenAt(editor.text, at);
+  if (!token) { say('Put the cursor on a \\ref, \\cite, \\label or \\input key.'); return null; }
+  if (token.kind === 'label') {
+    const uses = usesOf(token.key, state.texts);
+    showChecks(`${uses.length} ${uses.length === 1 ? 'use' : 'uses'} of ${token.key}`, uses.map(use => ({ title:use.text, detail:`${use.file}:${use.line}`, go:() => jump(use.file, use.line) })));
+    return uses;
+  }
+  const place = definitionOf(token, state.texts);
+  if (!place) { say(`No definition of ${token.key} in this project.`); return null; }
+  await jump(place.file, place.line);
+  return place;
+}
+
+async function linkBib(file) {
+  const text = await file.text(), incoming = parseBib(text).entries;
+  if (!incoming.length) throw new Error('That file holds no BibTeX entries.');
+  const target = bibFiles()[0] || 'references.bib', existing = new Set(bibEntries().map(entry => entry.key));
+  const fresh = incoming.filter(entry => !existing.has(entry.key));
+  if (!fresh.length) { say(`All ${incoming.length} entries are already in ${target}.`); return { added:0 }; }
+  if (!confirm(`Add ${fresh.length} new entries from ${file.name} to ${target}? ${incoming.length - fresh.length} are already there.`)) return { added:0 };
+  await setText(target, `${(state.texts[target] || '').trimEnd()}\n\n${fresh.map(entry => entry.raw).join('\n\n')}\n`.trimStart());
+  say(`Added ${fresh.length} entries to ${target}.`);
+  return { added:fresh.length };
 }
 
 async function formatFile() {
@@ -1129,6 +1158,14 @@ function bindPage() {
   $('check-setup').addEventListener('click', () => checkSetup().catch(fail));
   $('format').addEventListener('click', () => formatFile().catch(fail));
   renderSteps();
+  $('link-bib').addEventListener('change', event => { const [file] = event.target.files; event.target.value = ''; if (file) linkBib(file).catch(fail); });
+  $('wrap').addEventListener('change', event => {
+    const pick = event.target.value; event.target.value = '';
+    if (!pick || !editingText()) return;
+    if (pick === 'rename') { const name = prompt('New environment name'); if (name && !editor.renameEnvironment(name.trim())) say('The cursor is not inside an environment.'); }
+    else editor.wrapIn(pick);
+  });
+  $('definition').addEventListener('click', () => goToDefinition(editor.cursor).catch(fail));
   $('discover').addEventListener('click', () => { const query = prompt('Find papers about'); if (query) discoverPapers(query).catch(fail); });
   $('review-pdf').addEventListener('click', () => reviewPdf().catch(fail));
   $('check-references').addEventListener('click', () => auditReferences().catch(fail));
@@ -1212,6 +1249,7 @@ const commands = {
   'versions.save':({ label }) => keepVersion(label),
   async 'versions.changes'({ id }) { const version = (await listVersions(store, projectRoot())).find(item => item.id === id); return changesPdf(version); },
   'arxiv.pack':() => arxivPack(),
+  'project.definition':({ path, key, kind }) => definitionOf({ key, kind }, state.texts) ?? (kind === 'label' ? usesOf(key, state.texts) : null),
   'file.format':() => formatFile().then(() => ({ formatted:state.path })),
   'setup.check':() => checkSetup(),
   'references.discover':({ query }) => discoverPapers(query),

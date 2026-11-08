@@ -20,6 +20,7 @@ import { addFields, citeKey, cleanValue, parseBib, sameWork, scanEntries, writeE
 import { auditEntry, findPaper, fromCrossref, noticesOf } from '../src/lookup.js';
 import { checkPdf, checkSource } from '../src/blind.js';
 import { formatLatex } from '../src/format.js';
+import { definitionOf, detectVenue, enterAddition, environmentAt, tokenAt, usesOf } from '../src/latex-edit.js';
 import { keepProse, maskLatex } from '../src/spell.js';
 import { annotatePdf, annotationCount } from '../src/review-pdf.js';
 import { PDFDocument } from '../vendor/pdf-lib/pdf-lib.esm.js';
@@ -514,4 +515,33 @@ test('OpenAlex venues become proper entries', async () => {
   assert.equal(entry.fields.journal, 'J\\&K');
   assert.equal(entry.fields.pages, '5--9');
   assert.equal(parseBlg("You're missing a field name---line 3\n")[0].severity, 'error');
+});
+
+test('Enter continues a list, and an empty item ends it', () => {
+  assert.equal(enterAddition('  \\item first'), '\n  \\item ');
+  assert.equal(enterAddition('  \\item '), '');
+  assert.equal(enterAddition('plain'), null);
+});
+
+test('the environment around the cursor is found, nested ones first', () => {
+  const text = '\\begin{a}\n\\begin{b}x\\end{b}\n\\end{a}';
+  assert.equal(environmentAt(text, text.indexOf('x')).name, 'b');
+  assert.equal(environmentAt(text, text.indexOf('\n\\end{a}')).name, 'a');
+  assert.equal(environmentAt('none', 1), null);
+});
+
+test('definitions and uses across the project', () => {
+  const texts = { 'main.tex':'See \\ref{sec:a} and \\cite{k1,k2}.\n\\input{sec}', 'sec.tex':'\n\\section{A}\\label{sec:a}', 'r.bib':'@book{k2,\n}' };
+  const main = texts['main.tex'];
+  assert.deepEqual(tokenAt(main, main.indexOf('sec:a') + 1), { kind:'ref', key:'sec:a' });
+  assert.deepEqual(tokenAt(main, main.indexOf('k2')), { kind:'cite', key:'k2' });
+  assert.deepEqual(definitionOf({ kind:'ref', key:'sec:a' }, texts), { file:'sec.tex', line:2 });
+  assert.deepEqual(definitionOf({ kind:'cite', key:'k2' }, texts), { file:'r.bib', line:1 });
+  assert.deepEqual(definitionOf({ kind:'input', key:'sec' }, texts), { file:'sec.tex', line:1 });
+  assert.equal(usesOf('sec:a', texts).length, 1);
+});
+
+test('the venue comes from the preamble', () => {
+  assert.equal(detectVenue('\\documentclass{article}\n\\usepackage[preprint]{neurips_2026}\n\\begin{document}\\usepackage{icml}'), 'NeurIPS');
+  assert.equal(detectVenue('\\documentclass{article}'), null);
 });

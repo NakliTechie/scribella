@@ -416,6 +416,32 @@
         "type": "object",
         "properties": {}
       }
+    },
+    {
+      "name": "project.definition",
+      "description": "Find where a Scribella label, citation key or input file is defined, or every use of a label.",
+      "scope": "read",
+      "input": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "ref",
+              "cite",
+              "input",
+              "label"
+            ]
+          }
+        },
+        "required": [
+          "key",
+          "kind"
+        ]
+      }
     }
   ],
   "parity": {
@@ -481,6 +507,9 @@
     "check-setup": "setup.check",
     "spell": "view",
     "discover": "references.discover",
-    "review-pdf": "review.pdf"
+    "review-pdf": "review.pdf",
+    "wrap": "file.write",
+    "definition": "project.definition",
+    "link-bib": "person: choosing a file from disk is the person's own act"
   }
 }

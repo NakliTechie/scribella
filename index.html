@@ -114,6 +114,7 @@ body[data-building] #status::before{content:"● ";color:var(--brand)}
       <div id="sel-bar" hidden>
         <button id="annotate" class="btn small" data-command="annotate">Annotate</button>
         <select id="highlight" data-command="highlight" aria-label="Highlight"><option value="">Highlight…</option></select>
+        <select id="wrap" data-command="wrap" aria-label="Environment"><option value="">Environment…</option><option value="itemize">Wrap in itemize</option><option value="enumerate">Wrap in enumerate</option><option value="center">Wrap in center</option><option value="quote">Wrap in quote</option><option value="equation">Wrap in equation</option><option value="rename">Rename the one around the cursor</option></select>
         <span id="ai-tools" hidden><button id="proofread" class="btn small" data-command="proofread">Proofread</button> <button id="polish" class="btn small" data-command="polish">Polish</button> <button id="rewrite" class="btn small" data-command="rewrite">Rewrite…</button></span>
       </div>
       <div id="editor"></div>
@@ -122,7 +123,7 @@ body[data-building] #status::before{content:"● ";color:var(--brand)}
         <div class="tabs"><button id="tab-problems" class="tab" aria-pressed="true" data-command="tab-problems"><span id="problem-count">No problems</span></button><button id="tab-notes" class="tab" aria-pressed="false" data-command="tab-notes"><span id="notes-tab">Notes (0)</span></button><button id="tab-checks" class="tab" aria-pressed="false" data-command="tab-checks">Checks</button><button id="revise-all" class="btn small" data-command="revise-all" hidden>Revise all notes</button><button id="review-pdf" class="btn small" data-command="review-pdf">Review PDF</button></div>
         <div id="problems-list"><ul id="problems"></ul></div>
         <div id="checks" hidden>
-          <div class="rail-actions" style="padding:6px 10px"><button id="add-paper" class="btn small" data-command="add-paper">Add a paper</button><button id="discover" class="btn small" data-command="discover">Find papers</button><button id="check-setup" class="btn small" data-command="check-setup">Check setup</button><button id="check-references" class="btn small" data-command="check-references">Check references</button><button id="check-blind" class="btn small" data-command="check-blind">Double-blind check</button></div>
+          <div class="rail-actions" style="padding:6px 10px"><button id="add-paper" class="btn small" data-command="add-paper">Add a paper</button><label class="btn small file-pick">Link a .bib<input id="link-bib" type="file" accept=".bib" data-command="link-bib" aria-label="Link a .bib file"></label><button id="discover" class="btn small" data-command="discover">Find papers</button><button id="check-setup" class="btn small" data-command="check-setup">Check setup</button><button id="check-references" class="btn small" data-command="check-references">Check references</button><button id="check-blind" class="btn small" data-command="check-blind">Double-blind check</button></div>
           <strong id="checks-title" style="padding:0 10px"></strong>
           <ul id="checks-list"></ul>
         </div>
@@ -138,7 +139,7 @@ body[data-building] #status::before{content:"● ";color:var(--brand)}
     </section>
     <div class="split" data-column="--source" role="separator" aria-label="Resize the source"></div>
     <section id="pdf-side" aria-label="PDF">
-      <div id="pdf-bar"><span id="pages"></span><span id="pdf-hits"></span><input id="pdf-find" type="search" placeholder="Find in PDF" aria-label="Find in PDF" data-command="pdf-find" style="width:130px"><button id="show-in-pdf" class="btn small" data-command="show-in-pdf" title="Ctrl or Cmd + Enter. Double-click the PDF to jump back.">Show in PDF</button><button id="zoom-out" class="btn small" data-command="zoom-out" aria-label="Zoom out">−</button><button id="zoom-in" class="btn small" data-command="zoom-in" aria-label="Zoom in">+</button></div>
+      <div id="pdf-bar"><span id="pages"></span><span id="pdf-hits"></span><input id="pdf-find" type="search" placeholder="Find in PDF" aria-label="Find in PDF" data-command="pdf-find" style="width:130px"><button id="definition" class="btn small" data-command="definition" title="F12">Definition</button><button id="show-in-pdf" class="btn small" data-command="show-in-pdf" title="Ctrl or Cmd + Enter. Double-click the PDF to jump back.">Show in PDF</button><button id="zoom-out" class="btn small" data-command="zoom-out" aria-label="Zoom out">−</button><button id="zoom-in" class="btn small" data-command="zoom-in" aria-label="Zoom in">+</button></div>
       <div id="pdf"></div>
     </section>
   </main>
