@@ -110,22 +110,6 @@ export function createEditor(parent, { onChange, onSave, onDrop, onShow, onDefin
       extensions:[
         keyMode.of(keysFor(keys)),
         spellMode.of([]),
-        basicSetup,
-        mathHover,
-        hoverTooltip((current, pos) => {
-          const source = current.state.doc.toString();
-          const ref = refAt(source, pos), cite = ref || citeAt(source, pos), text = ref ? describeRef(ref.key) : cite && describeCite(cite.key);
-          if (!text) return null;
-          return { pos:cite.from, end:cite.to, above:true, create() {
-            const dom = document.createElement('div');
-            dom.className = 'cite-tip';
-            dom.textContent = text;
-            return { dom };
-          } };
-        }),
-        marks,
-        StreamLanguage.define(stex),
-        EditorView.lineWrapping,
         keymap.of([
           { key:'Enter', run:current => {
             const { head, empty } = current.state.selection.main;
@@ -142,6 +126,22 @@ export function createEditor(parent, { onChange, onSave, onDrop, onShow, onDefin
           { key:'Mod-b', preventDefault:true, run:current => wrapCommand(current, 'textbf') },
           { key:'Mod-i', preventDefault:true, run:current => wrapCommand(current, 'emph') },
         ]),
+        basicSetup,
+        mathHover,
+        hoverTooltip((current, pos) => {
+          const source = current.state.doc.toString();
+          const ref = refAt(source, pos), cite = ref || citeAt(source, pos), text = ref ? describeRef(ref.key) : cite && describeCite(cite.key);
+          if (!text) return null;
+          return { pos:cite.from, end:cite.to, above:true, create() {
+            const dom = document.createElement('div');
+            dom.className = 'cite-tip';
+            dom.textContent = text;
+            return { dom };
+          } };
+        }),
+        marks,
+        StreamLanguage.define(stex),
+        EditorView.lineWrapping,
         keymap.of([indentWithTab, { key:'Mod-s', preventDefault:true, run:() => { onSave(); return true; } }, { key:'Mod-Enter', preventDefault:true, run:() => { onShow(); return true; } }]),
         lintGutter(),
         linter(current => (/\.(tex|ltx)$/i.test(path()) ? lintSource(current.state.doc.toString(), project(), path()) : []), { delay:400 }),

@@ -1,3 +1,5 @@
+import { blankComments } from './lint.js';
+
 // Small LaTeX editing moves on plain text: what Enter adds inside a list, wrapping a selection in an environment,
 // renaming the environment around a position, and finding where a label, citation or input is defined.
 export function enterAddition(lineText) {
@@ -9,8 +11,8 @@ export function enterAddition(lineText) {
 export const wrap = (text, name) => `\\begin{${name}}\n${text}\n\\end{${name}}`;
 
 // The innermost environment holding `pos`, as positions of its two names.
-export function environmentAt(text, pos) {
-  const stack = [];
+export function environmentAt(source, pos) {
+  const text = blankComments(source), stack = [];
   for (const match of text.matchAll(/\\(begin|end)\{([^}]+)\}/g)) {
     const nameFrom = match.index + match[0].indexOf('{') + 1, nameTo = nameFrom + match[2].length;
     if (match[1] === 'begin') { stack.push({ name:match[2], open:[nameFrom, nameTo], start:match.index }); continue; }

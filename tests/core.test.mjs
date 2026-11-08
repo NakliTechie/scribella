@@ -618,3 +618,8 @@ test('the agent loops through tool calls and stops with an answer', async () => 
   const endless = await agentTurn([], { ask:async () => ({ role:'assistant', tool_calls:[{ id:'x', function:{ name:'search', arguments:'bad json' } }] }), run:async () => { throw new Error('no'); } });
   assert.match(endless.text, /eight steps/);
 });
+
+test('a commented begin is not an environment', () => {
+  const text = '\\begin{document}\n% \\begin{figure}\nx\n\\end{document}';
+  assert.equal(environmentAt(text, text.indexOf('x')).name, 'document');
+});

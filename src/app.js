@@ -776,16 +776,39 @@ async function goToDefinition(at) {
   return place;
 }
 
-async function linkBib(file) {
+function linkBib(file) {
+  const run = addQueue.then(() => linkBibNow(file));
+  addQueue = run.catch(() => {});
+  return run;
+}
+
+// Entries already present by key and paper are skipped. A key taken by a different paper gets a letter, and the
+// person is told, because citations written against the other file still use the old key.
+async function linkBibNow(file) {
   const text = await file.text(), incoming = parseBib(text).entries;
   if (!incoming.length) throw new Error('That file holds no BibTeX entries.');
-  const target = bibFiles()[0] || 'references.bib', existing = new Set(bibEntries().map(entry => entry.key));
-  const fresh = incoming.filter(entry => !existing.has(entry.key));
-  if (!fresh.length) { say(`All ${incoming.length} entries are already in ${target}.`); return { added:0 }; }
-  if (!confirm(`Add ${fresh.length} new entries from ${file.name} to ${target}? ${incoming.length - fresh.length} are already there.`)) return { added:0 };
-  await setText(target, `${(state.texts[target] || '').trimEnd()}\n\n${fresh.map(entry => entry.raw).join('\n\n')}\n`.trimStart());
-  say(`Added ${fresh.length} entries to ${target}.`);
-  return { added:fresh.length };
+  const target = bibFiles()[0] || 'references.bib', existing = bibEntries();
+  const fresh = [], renamed = [];
+  for (const entry of incoming) {
+    const same = existing.find(item => item.key === entry.key);
+    if (same && sameWork(same.fields, entry.fields)) continue;
+    let raw = entry.raw;
+    if (same) {
+      let key = entry.key;
+      for (let letter = 98; existing.some(item => item.key === key) || fresh.some(item => item.key === key); letter += 1) key = `${entry.key}${String.fromCharCode(letter)}`;
+      raw = raw.replace(/^(@\w+\s*\{\s*)[^,\s]+/, `$1${key}`);
+      renamed.push(`${entry.key} → ${key}`);
+      fresh.push({ key, raw });
+    } else fresh.push({ key:entry.key, raw });
+  }
+  const current = state.texts[target] || '';
+  // @string and @preamble blocks carry definitions entries may use; new ones come along.
+  const definitions = [...text.matchAll(/@(string|preamble)\s*\{[^@]*?\}\s*(?=@|$)/gi)].map(match => match[0].trim()).filter(block => !current.includes(block));
+  if (!fresh.length && !definitions.length) { say(`All ${incoming.length} entries are already in ${target}.`); return { added:0 }; }
+  if (!confirm(`Add ${fresh.length} entries from ${file.name} to ${target}?${renamed.length ? ` ${renamed.length} keys are taken by other papers and get a letter: ${renamed.join(', ')}.` : ''}`)) return { added:0 };
+  await setText(target, `${definitions.join('\n')}${definitions.length ? '\n\n' : ''}${current.trimEnd()}\n\n${fresh.map(entry => entry.raw).join('\n\n')}\n`.trimStart());
+  say(`Added ${fresh.length} entries to ${target}.${renamed.length ? ` Renamed: ${renamed.join(', ')}.` : ''}`);
+  return { added:fresh.length, renamed };
 }
 
 async function formatFile() {
