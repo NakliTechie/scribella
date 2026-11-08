@@ -664,3 +664,7 @@ test('Beamer frames appear in the outline, titled either way', () => {
   const files = { 'main.tex':'\\section{Intro}\n\\begin{frame}{One}\n\\end{frame}\n\\begin{frame}\n\\frametitle{Two}\n\\end{frame}\n\\begin{frame}\n\\end{frame}' };
   assert.deepEqual(buildOutline(path => files[path], 'main.tex').map(item => item.title), ['Intro', 'One', 'Two', 'Untitled frame']);
 });
+
+test('word count of an included chapter counts its whole text', () => {
+  assert.equal(wordCount('\\chapter{Intro}\nThree words here.'), 3);
+});

@@ -135,7 +135,10 @@ async function saveNow() {
 function showCounts() {
   const main = state.texts[state.settings.main];
   const venue = main && detectVenue(main);
-  $('words').textContent = main ? `${venue ? `${venue} · ` : ''}About ${wordCount(main).toLocaleString('en')} words` : '';
+  // Chapters brought in with \input count too, so a thesis is not counted as its empty main file.
+  const included = main ? usedFiles({ files:state.files, texts:state.texts, main:state.settings.main }).used.filter(path => /\.(tex|ltx)$/i.test(path)) : [];
+  const words = included.reduce((total, path) => total + wordCount(state.texts[path] || ''), 0);
+  $('words').textContent = main ? `${venue ? `${venue} · ` : ''}About ${words.toLocaleString('en')} words` : '';
   renderOutline();
 }
 
