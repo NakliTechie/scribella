@@ -657,3 +657,8 @@ test('a board file cannot carry markup, and sheets keep their quoting', () => {
   assert.equal(writeSheet(multi), '"line\none",2\n');
   assert.equal(writeSheet({ separator:'\t', rows:[['a\tb', 'c']] }), '"a\tb"\tc\n');
 });
+
+test('Beamer frames appear in the outline, titled either way', () => {
+  const files = { 'main.tex':'\\section{Intro}\n\\begin{frame}{One}\n\\end{frame}\n\\begin{frame}\n\\frametitle{Two}\n\\end{frame}\n\\begin{frame}\n\\end{frame}' };
+  assert.deepEqual(buildOutline(path => files[path], 'main.tex').map(item => item.title), ['Intro', 'One', 'Two', 'Untitled frame']);
+});
