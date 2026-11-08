@@ -4,10 +4,22 @@ import { PDFDocument, rgb } from '../vendor/pdf-lib/pdf-lib.esm.js';
 
 export const blankBoard = () => ({ width:640, height:400, shapes:[] });
 
+const KINDS = new Set(['pen', 'rect', 'ellipse', 'arrow', 'text']);
+const number = value => (Number.isFinite(Number(value)) ? Number(value) : 0);
+
+// Every field is coerced to its type, so a file cannot carry markup into the SVG.
+export function cleanShape(shape) {
+  if (!shape || !KINDS.has(shape.kind)) return null;
+  if (shape.kind === 'pen') return { kind:'pen', points:(Array.isArray(shape.points) ? shape.points : []).map(point => [number(point?.[0]), number(point?.[1])]) };
+  if (shape.kind === 'arrow') return { kind:'arrow', x1:number(shape.x1), y1:number(shape.y1), x2:number(shape.x2), y2:number(shape.y2) };
+  if (shape.kind === 'text') return { kind:'text', x:number(shape.x), y:number(shape.y), text:String(shape.text ?? '') };
+  return { kind:shape.kind, x:number(shape.x), y:number(shape.y), w:number(shape.w), h:number(shape.h) };
+}
+
 export function readBoard(text) {
   try {
     const board = JSON.parse(text);
-    return Array.isArray(board.shapes) ? { width:Number(board.width) || 640, height:Number(board.height) || 400, shapes:board.shapes } : blankBoard();
+    return Array.isArray(board.shapes) ? { width:number(board.width) || 640, height:number(board.height) || 400, shapes:board.shapes.map(cleanShape).filter(Boolean) } : blankBoard();
   } catch (_) { return blankBoard(); }
 }
 

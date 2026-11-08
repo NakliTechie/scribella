@@ -121,8 +121,10 @@ async function saveNow() {
   if (!state.dirty || !state.path) return;
   state.dirty = false;
   try {
-    await writeFile(state.path, state.texts[state.path]);
-    state.saved[state.path] = state.texts[state.path];
+    // The text is taken before the write, so keystrokes typed while it runs are not marked as saved.
+    const path = state.path, text = state.texts[path];
+    await writeFile(path, text);
+    state.saved[path] = text;
   } catch (error) {
     state.dirty = true;
     say(`Saving failed: ${error.message}`, true);
@@ -355,6 +357,13 @@ async function outsideChange(event) {
     const text = await store.read(fullPath(path));
     // Our own saves arrive here too; they match what we hold.
     if (text === state.texts[path]) return;
+    if (path === state.path && (isSheet(path) || isBoard(path))) {
+      state.texts[path] = text;
+      state.saved[path] = text;
+      if (isSheet(path)) { state.sheet = readSheet(text, path); renderSheet(); } else { state.board = readBoard(text); renderBoard(); }
+      say(`${path} changed outside and is shown as it is now.`);
+      return;
+    }
     const merged = path === state.path && state.dirty && state.saved[path] != null ? merge3(state.saved[path], editor.text, text) : null;
     if (merged && !merged.conflicts) {
       state.saved[path] = text;
@@ -534,11 +543,19 @@ async function dropFiles(files, at) {
 }
 
 // Data sheets and boards save through the same path as text, so the outside-edit check and versions cover them.
-async function saveStructured(text) {
-  state.texts[state.path] = text;
+let structuredQueue = Promise.resolve();
+function saveStructured(text) {
+  const path = state.path;
+  state.texts[path] = text;
   state.revision += 1;
-  await writeFile(state.path, text);
-  state.saved[state.path] = text;
+  // Saves run in order, so an older one cannot land after a newer one; a failure says so and the next edit retries.
+  const run = structuredQueue.then(async () => {
+    if (state.texts[path] !== text) return;
+    await writeFile(path, text);
+    state.saved[path] = text;
+  });
+  structuredQueue = run.catch(error => say(`Saving ${path} failed: ${error.message}. Your next change tries again.`, true));
+  return run;
 }
 
 function renderSheet() {
@@ -706,15 +723,21 @@ async function commitProject(message) {
 }
 
 async function showCommit(item) {
-  const repo = gitOf(), files = await repo.changed(item.oid);
-  showChecks(`${item.message}: ${files.length} ${files.length === 1 ? 'file' : 'files'}`, files.map(path => ({
-    title:path, detail:'Changed in this commit',
-    fixLabel:'Restore this version', fix:async () => {
-      if (!confirm(`Replace ${path} with its version from "${item.message}"? Commit first if you want to keep the current one.`)) return;
-      const bytes = await repo.readAt(item.oid, path);
-      await setText(path, new TextDecoder().decode(bytes));
-    },
-  })));
+  const project = state.project, repo = gitOf(), files = await repo.changed(item.oid);
+  const rows = await Promise.all(files.map(async path => {
+    const bytes = await repo.readAt(item.oid, path).catch(() => null);
+    if (!bytes) return { title:path, detail:'Deleted in this commit' };
+    return {
+      title:path, detail:'Changed in this commit',
+      fixLabel:'Restore this version', fix:async () => {
+        if (state.project !== project) throw new Error('This commit belongs to another project.');
+        if (!confirm(`Replace ${path} with its version from "${item.message}"? Commit first if you want to keep the current one.`)) return;
+        if (isText(path)) await setText(path, new TextDecoder().decode(bytes));
+        else { await writeFile(path, bytes); state.files = await listFiles(store, state.project); renderTree(); }
+      },
+    };
+  }));
+  showChecks(`${item.message}: ${files.length} ${files.length === 1 ? 'file' : 'files'}`, rows);
 }
 
 const OVERLEAF_PROXY = 'https://scribella.naklitechie.com/git-proxy';

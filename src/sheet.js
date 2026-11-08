@@ -1,12 +1,31 @@
-// A data sheet is a CSV or TSV file shown as a grid. It writes back in the format it came in.
-import { parseTable } from './insert.js';
-
-export function readSheet(text, path) {
-  const rows = text.trim() ? parseTable(text) : [['']];
-  const width = Math.max(...rows.map(row => row.length));
-  return { separator:/\.tsv$/i.test(path) ? '\t' : ',', rows:rows.map(row => [...row, ...Array(width - row.length).fill('')]) };
+// A data sheet is a CSV or TSV file shown as a grid. It writes back in the format it came in, quoting what needs it.
+export function parseDelimited(text, separator) {
+  const rows = [];
+  let row = [], cell = '', quoted = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
+    if (quoted) {
+      if (char === '"' && text[i + 1] === '"') { cell += '"'; i += 1; }
+      else if (char === '"') quoted = false;
+      else cell += char;
+    } else if (char === '"' && cell === '') quoted = true;
+    else if (char === separator) { row.push(cell); cell = ''; }
+    else if (char === '\n' || char === '\r') {
+      if (char === '\r' && text[i + 1] === '\n') i += 1;
+      row.push(cell); rows.push(row); row = []; cell = '';
+    } else cell += char;
+  }
+  if (cell !== '' || row.length) { row.push(cell); rows.push(row); }
+  return rows;
 }
 
-const quote = (cell, separator) => (/[",\n\t]/.test(cell) && (separator === ',' || cell.includes('\t')) ? `"${cell.replace(/"/g, '""')}"` : cell);
+export function readSheet(text, path) {
+  const separator = /\.tsv$/i.test(path) ? '\t' : ',';
+  const rows = text.trim() ? parseDelimited(text, separator) : [['']];
+  const width = Math.max(...rows.map(row => row.length));
+  return { separator, rows:rows.map(row => [...row, ...Array(width - row.length).fill('')]) };
+}
+
+const quote = (cell, separator) => (cell.includes(separator) || /["\n\r]/.test(cell) ? `"${cell.replace(/"/g, '""')}"` : cell);
 
 export const writeSheet = ({ rows, separator }) => `${rows.map(row => row.map(cell => quote(cell, separator)).join(separator)).join('\n')}\n`;

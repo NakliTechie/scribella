@@ -646,3 +646,14 @@ test('the Git proxy forwards only smart-HTTP paths to Overleaf, for known origin
   assert.equal((await ask('/git-proxy/git.overleaf.com/abc123/git-upload-pack', { method:'OPTIONS' })).status, 204);
   assert.equal(calls.length, 1);
 });
+
+test('a board file cannot carry markup, and sheets keep their quoting', () => {
+  const board = readBoard(JSON.stringify({ shapes:[{ kind:'rect', x:'1" onload="alert(1)', y:2, w:3, h:4 }, { kind:'script' }, { kind:'pen', points:[['<x>', 1]] }] }));
+  assert.equal(board.shapes.length, 2);
+  assert.ok(!boardSvg(board).includes('onload'));
+  assert.deepEqual(readSheet('a,b\n', 'x.tsv').rows, [['a,b']]);
+  const multi = readSheet('"line\none",2\n', 'x.csv');
+  assert.deepEqual(multi.rows, [['line\none', '2']]);
+  assert.equal(writeSheet(multi), '"line\none",2\n');
+  assert.equal(writeSheet({ separator:'\t', rows:[['a\tb', 'c']] }), '"a\tb"\tc\n');
+});
